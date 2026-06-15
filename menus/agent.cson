@@ -1,0 +1,20 @@
+'menu': [
+  {
+    'label': 'Packages'
+    'submenu': [
+      {
+        'label': 'Pulsar ACP Agent'
+        'submenu': [
+          {
+            'label': 'Toggle Panel'
+            'command': 'pulsar-acp-agent:toggle'
+          }
+          {
+            'label': 'Focus Panel'
+            'command': 'pulsar-acp-agent:focus'
+          }
+        ]
+      }
+    ]
+  }
+]

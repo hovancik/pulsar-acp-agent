@@ -1,0 +1,8 @@
+# Dependencies are dev-only (bundled into lib/main.js at build time).
+node_modules/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Keep the built bundle (lib/main.js) committed so `ppm link` / install works
+# without a build step. Do NOT ignore lib/.
