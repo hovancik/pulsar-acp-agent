@@ -1,0 +1,3 @@
+# Force LF line endings for all text files so the generated bundle in lib/ is
+# byte-for-byte reproducible across platforms (CI builds on Linux).
+* text=auto eol=lf

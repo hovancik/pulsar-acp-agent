@@ -1,0 +1,77 @@
+{
+  "name": "pulsar-acp-agent",
+  "main": "./lib/main.js",
+  "version": "0.1.0",
+  "description": "Bring your own AI coding agent to Pulsar via the Agent Client Protocol (ACP).",
+  "keywords": [
+    "acp",
+    "agent",
+    "ai",
+    "copilot",
+    "assistant"
+  ],
+  "license": "BSD-2-Clause",
+  "engines": {
+    "atom": ">=1.132.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hovancik/pulsar-acp-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hovancik/pulsar-acp-agent/issues"
+  },
+  "homepage": "https://github.com/hovancik/pulsar-acp-agent#readme",
+  "files": [
+    "keymaps",
+    "lib",
+    "menus",
+    "styles",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "THIRD-PARTY-NOTICES.md"
+  ],
+  "activationCommands": {
+    "atom-workspace": [
+      "pulsar-acp-agent:toggle",
+      "pulsar-acp-agent:focus"
+    ]
+  },
+  "deserializers": {
+    "PulsarAcpAgentView": "deserializePulsarAcpAgentView"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
+    "version": "npm run build && git add lib"
+  },
+  "devDependencies": {
+    "@agentclientprotocol/sdk": "^0.25.0",
+    "@types/atom": "npm:@pulsar-edit/types@^1.132.0",
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^20.19.0",
+    "cross-spawn": "^7.0.6",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.6.3",
+    "zod": "^3.25.76"
+  },
+  "configSchema": {
+    "command": {
+      "type": "string",
+      "default": "copilot --acp --stdio",
+      "order": 1,
+      "title": "Agent command",
+      "description": "Full command line for an executable that speaks ACP over stdio. Examples: `copilot --acp --stdio`, `gemini --experimental-acp`. Wrap a path that contains spaces in double quotes."
+    },
+    "cwd": {
+      "type": "string",
+      "default": "",
+      "order": 2,
+      "title": "Working directory",
+      "description": "Absolute path used as the session working directory. Leave blank to use the first open project folder."
+    }
+  }
+}
