@@ -1,0 +1,188 @@
+@import "ui-variables";
+
+.pulsar-acp-agent {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 240px;
+  background-color: @tool-panel-background-color;
+  color: @text-color;
+}
+
+.pulsar-acp-agent-header {
+  display: flex;
+  align-items: center;
+  padding: (@component-padding / 2) @component-padding;
+  border-bottom: 1px solid @pane-item-border-color;
+
+  .pulsar-acp-agent-title {
+    font-weight: bold;
+  }
+
+  .pulsar-acp-agent-status {
+    flex: 1;
+    margin: 0 @component-padding;
+    color: @text-color-subtle;
+    font-size: 0.85em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.pulsar-acp-agent-conversation {
+  flex: 1;
+  overflow-y: auto;
+  padding: @component-padding;
+}
+
+.pulsar-acp-agent-message {
+  margin-bottom: @component-padding;
+
+  .pulsar-acp-agent-message-role {
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: @text-color-subtle;
+    margin-bottom: 2px;
+  }
+
+  .pulsar-acp-agent-message-body {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
+
+.pulsar-acp-agent-message--user .pulsar-acp-agent-message-body {
+  color: @text-color-highlight;
+}
+
+.pulsar-acp-agent-message--thought .pulsar-acp-agent-message-body {
+  color: @text-color-subtle;
+  font-style: italic;
+}
+
+.pulsar-acp-agent-message--note {
+  color: @text-color-info;
+  font-size: 0.9em;
+}
+
+.pulsar-acp-agent-message--error {
+  color: @text-color-error;
+  white-space: pre-wrap;
+  padding: (@component-padding / 2);
+  border: 1px solid @text-color-error;
+  border-radius: @component-border-radius;
+  margin-bottom: @component-padding;
+}
+
+.pulsar-acp-agent-tool {
+  border: 1px solid @pane-item-border-color;
+  border-radius: @component-border-radius;
+  padding: (@component-padding / 2);
+  margin-bottom: @component-padding;
+
+  .pulsar-acp-agent-tool-heading {
+    display: flex;
+    align-items: center;
+  }
+
+  .pulsar-acp-agent-tool-status {
+    margin-right: 6px;
+  }
+
+  &[data-status="failed"] .pulsar-acp-agent-tool-status {
+    color: @text-color-error;
+  }
+
+  &[data-status="completed"] .pulsar-acp-agent-tool-status {
+    color: @text-color-success;
+  }
+
+  .pulsar-acp-agent-tool-body {
+    margin-top: 4px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: monospace;
+    font-size: 0.9em;
+    color: @text-color-subtle;
+  }
+}
+
+.pulsar-acp-agent-diff {
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: 0.9em;
+
+  .pulsar-acp-agent-diff-line {
+    white-space: pre-wrap;
+  }
+
+  .pulsar-acp-agent-diff-line--path,
+  .pulsar-acp-agent-diff-line--context {
+    color: @text-color-subtle;
+  }
+
+  .pulsar-acp-agent-diff-line--added {
+    color: @text-color-success;
+  }
+
+  .pulsar-acp-agent-diff-line--removed {
+    color: @text-color-error;
+  }
+}
+
+.pulsar-acp-agent-plan {
+  border-left: 2px solid @background-color-info;
+  padding-left: @component-padding;
+  margin-bottom: @component-padding;
+
+  .pulsar-acp-agent-plan-heading {
+    font-weight: bold;
+    margin-bottom: 4px;
+  }
+
+  .pulsar-acp-agent-plan-entry[data-status="completed"] {
+    color: @text-color-subtle;
+    text-decoration: line-through;
+  }
+}
+
+.pulsar-acp-agent-permission {
+  border: 1px solid @background-color-warning;
+  border-radius: @component-border-radius;
+  padding: (@component-padding / 2);
+  margin-bottom: @component-padding;
+
+  .pulsar-acp-agent-permission-question {
+    margin-bottom: 6px;
+  }
+
+  .pulsar-acp-agent-permission-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+
+    .pulsar-acp-agent-reject {
+      opacity: 0.8;
+    }
+  }
+}
+
+.pulsar-acp-agent-footer {
+  border-top: 1px solid @pane-item-border-color;
+  padding: (@component-padding / 2) @component-padding;
+
+  .pulsar-acp-agent-input {
+    width: 100%;
+    resize: vertical;
+    font-family: inherit;
+  }
+
+  .pulsar-acp-agent-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 6px;
+  }
+}
