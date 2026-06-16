@@ -5,13 +5,22 @@ const pkg = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf8"),
 );
 
+// Single source of truth for the toolchain Node version (also used by CI via
+// `node-version-file`). Pinned to Pulsar's runtime: Electron 30.5.1 / Node 20.16.0.
+const nodeTarget = readFileSync(
+  new URL("./.nvmrc", import.meta.url),
+  "utf8",
+).trim();
+
+// main.ts is Pulsar's entry point. util.ts is bundled on its own as well so its
+// pure helpers can be unit-tested without loading `atom` (test/ imports lib/util.js).
 const options = {
-  entryPoints: ["src/main.ts"],
-  outfile: "lib/main.js",
+  entryPoints: ["src/main.ts", "src/util.ts"],
+  outdir: "lib",
   bundle: true,
   platform: "node",
   format: "cjs",
-  target: "node20",
+  target: `node${nodeTarget}`,
   sourcemap: true,
   external: ["atom", "electron"],
   define: {

@@ -14,9 +14,11 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          # Match Pulsar's runtime: Electron 30.5.1 bundles Node 20.16.0.
+          node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
-      - run: git diff --exit-code lib/main.js lib/main.js.map
+      - run: git diff --exit-code lib/main.js lib/main.js.map lib/util.js lib/util.js.map
+      - run: npm test
