@@ -18,7 +18,7 @@ type ToolView = {
   body: HTMLElement;
 };
 
-type PendingImage = { id: number; data: string; mimeType: string };
+type PendingImage = { id: number; data: string; mimeType: string; file: File };
 
 const STDERR_LIMIT = 4000;
 
@@ -458,11 +458,9 @@ export class PulsarAcpAgentView {
   ): void {
     const body = this.appendMessage("user", text);
     for (const img of images) {
-      const el = document.createElement("img");
-      el.classList.add("pulsar-acp-agent-inline-image");
-      el.src = `data:${img.mimeType};base64,${img.data}`;
-      el.alt = "";
-      body.appendChild(el);
+      body.appendChild(
+        this.createImageCanvas(img.file, "pulsar-acp-agent-inline-image"),
+      );
     }
   }
 
@@ -487,18 +485,22 @@ export class PulsarAcpAgentView {
       this.pendingImageLoads++;
       this.updateInputControls();
       reader.onload = () => {
-        if (generation !== this.imageLoadGeneration) return;
-        if (typeof reader.result !== "string") {
+        if (generation !== this.imageLoadGeneration) {
+          return;
+        }
+        if (!(reader.result instanceof ArrayBuffer)) {
           this.appendError(`Could not read image "${file.name}".`);
           return;
         }
-        const result = reader.result as string;
-        const commaIdx = result.indexOf(",");
-        const data = commaIdx >= 0 ? result.slice(commaIdx + 1) : result;
+        const bytes = new Uint8Array(reader.result);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++)
+          binary += String.fromCharCode(bytes[i]);
         const image = {
           id: this.nextImageId++,
-          data,
+          data: btoa(binary),
           mimeType: file.type,
+          file,
         };
         this.pendingImages.push(image);
         this.renderThumbnail(image);
@@ -512,7 +514,7 @@ export class PulsarAcpAgentView {
         this.pendingImageLoads--;
         this.updateInputControls();
       };
-      reader.readAsDataURL(file);
+      reader.readAsArrayBuffer(file);
     }
   }
 
@@ -520,9 +522,7 @@ export class PulsarAcpAgentView {
     this.thumbnailStrip.style.display = "";
     const wrapper = document.createElement("div");
     wrapper.classList.add("pulsar-acp-agent-thumbnail");
-    const img = document.createElement("img");
-    img.src = `data:${image.mimeType};base64,${image.data}`;
-    img.alt = "";
+    const canvas = this.createImageCanvas(image.file);
     const remove = document.createElement("button");
     remove.classList.add("pulsar-acp-agent-thumbnail-remove");
     remove.textContent = "\u00d7";
@@ -535,7 +535,7 @@ export class PulsarAcpAgentView {
         this.thumbnailStrip.style.display = "none";
       this.updateInputControls();
     });
-    wrapper.appendChild(img);
+    wrapper.appendChild(canvas);
     wrapper.appendChild(remove);
     this.thumbnailStrip.appendChild(wrapper);
   }
@@ -543,6 +543,33 @@ export class PulsarAcpAgentView {
   private clearThumbnails(): void {
     this.thumbnailStrip.innerHTML = "";
     this.thumbnailStrip.style.display = "none";
+  }
+
+  private createImageCanvas(file: File, className?: string): HTMLCanvasElement {
+    const canvas = document.createElement("canvas");
+    if (className) canvas.classList.add(className);
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", file.name || "Attached image");
+    createImageBitmap(file)
+      .then((bitmap) => {
+        if (!canvas.isConnected) {
+          bitmap.close();
+          return;
+        }
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          bitmap.close();
+          return;
+        }
+        context.drawImage(bitmap, 0, 0);
+        bitmap.close();
+      })
+      .catch((error) =>
+        console.warn("[pulsar-acp-agent] image preview failed", error),
+      );
+    return canvas;
   }
 
   private canAcceptImages(): boolean {
