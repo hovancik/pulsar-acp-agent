@@ -26,6 +26,7 @@ export class PulsarAcpAgentView {
   private session: AgentSession;
   private eventSubscription!: { dispose: () => void };
   private toolViews = new Map<string, ToolView>();
+  private terminalOutputs = new Map<string, string>();
   private planElement: HTMLElement | null = null;
   private stderrBody: HTMLElement | null = null;
   private streamRole: string | null = null;
@@ -121,7 +122,9 @@ export class PulsarAcpAgentView {
     this.appendMessage("user", text);
     this.endStreamingBlocks();
     this.sendButton.disabled = true;
+    const currentSession = this.session;
     this.session.prompt(text).catch((error) => {
+      if (this.session !== currentSession) return;
       this.appendError(error.message || String(error));
       this.sendButton.disabled = false;
       this.stopButton.disabled = true;
@@ -138,6 +141,7 @@ export class PulsarAcpAgentView {
     this.subscriptions.add(this.eventSubscription);
     this.conversation.innerHTML = "";
     this.toolViews.clear();
+    this.terminalOutputs.clear();
     this.planElement = null;
     this.stderrBody = null;
     this.endStreamingBlocks();
@@ -158,6 +162,7 @@ export class PulsarAcpAgentView {
       case "turn-start":
         this.stopButton.disabled = false;
         this.sendButton.disabled = true;
+        this.stderrBody = null;
         break;
       case "turn-end":
         this.stopButton.disabled = true;
@@ -175,6 +180,9 @@ export class PulsarAcpAgentView {
         break;
       case "file-written":
         this.appendNote(`Wrote ${event.path}`);
+        break;
+      case "terminal-output":
+        this.handleTerminalOutput(event.terminalId, event.output);
         break;
       case "stderr":
         console.warn("[pulsar-acp-agent]", event.text);
@@ -382,9 +390,26 @@ export class PulsarAcpAgentView {
     } else if (item.type === "content") {
       node.textContent = this.contentToText(item.content);
     } else if (item.type === "terminal") {
-      node.textContent = "[terminal output]";
+      node.classList.add("pulsar-acp-agent-terminal");
+      const pre = document.createElement("pre");
+      pre.classList.add("pulsar-acp-agent-terminal-output");
+      pre.dataset.terminalId = item.terminalId;
+      pre.textContent = this.terminalOutputs.get(item.terminalId) ?? "";
+      node.appendChild(pre);
     }
     return node;
+  }
+
+  private handleTerminalOutput(terminalId: string, output: string): void {
+    this.terminalOutputs.set(terminalId, output);
+    const elements = Array.from(
+      this.conversation.querySelectorAll("pre.pulsar-acp-agent-terminal-output"),
+    ).filter((el) => (el as HTMLElement).dataset.terminalId === terminalId);
+    if (elements.length === 0) return;
+    for (const element of elements) {
+      element.textContent = output;
+    }
+    this.scrollToBottom();
   }
 
   private renderDiff(node: HTMLElement, diff: acp.Diff): void {
@@ -413,7 +438,12 @@ export class PulsarAcpAgentView {
       newSuffixStart--;
     }
 
-    for (const line of oldLines.slice(0, prefixLength)) {
+    const DIFF_CONTEXT = 3;
+    const prefixStart = Math.max(0, prefixLength - DIFF_CONTEXT);
+    if (prefixStart > 0) {
+      this.appendDiffLine(node, "context", " \u2026");
+    }
+    for (const line of oldLines.slice(prefixStart, prefixLength)) {
       this.appendDiffLine(node, "context", ` ${line}`);
     }
     for (const line of oldLines.slice(prefixLength, oldSuffixStart)) {
@@ -422,8 +452,12 @@ export class PulsarAcpAgentView {
     for (const line of newLines.slice(prefixLength, newSuffixStart)) {
       this.appendDiffLine(node, "added", `+${line}`);
     }
-    for (const line of oldLines.slice(oldSuffixStart)) {
+    const suffixEnd = Math.min(oldLines.length, oldSuffixStart + DIFF_CONTEXT);
+    for (const line of oldLines.slice(oldSuffixStart, suffixEnd)) {
       this.appendDiffLine(node, "context", ` ${line}`);
+    }
+    if (suffixEnd < oldLines.length) {
+      this.appendDiffLine(node, "context", " \u2026");
     }
   }
 
@@ -470,7 +504,9 @@ export class PulsarAcpAgentView {
       row.textContent = `${mark} ${entry.content}`;
       this.planElement.appendChild(row);
     }
-    this.conversation.appendChild(this.planElement);
+    if (!this.planElement.isConnected) {
+      this.conversation.appendChild(this.planElement);
+    }
     this.scrollToBottom();
   }
 
@@ -516,7 +552,12 @@ export class PulsarAcpAgentView {
   }
 
   private scrollToBottom(): void {
-    this.conversation.scrollTop = this.conversation.scrollHeight;
+    const isAtBottom =
+      this.conversation.scrollHeight - this.conversation.scrollTop <=
+      this.conversation.clientHeight + 50;
+    if (isAtBottom) {
+      this.conversation.scrollTop = this.conversation.scrollHeight;
+    }
   }
 
   getTitle(): string {

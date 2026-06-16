@@ -32,12 +32,12 @@ At `initialize` the client sends (`src/agent-session.ts`):
 ```jsonc
 clientCapabilities: {
   fs: { readTextFile: true, writeTextFile: true },
-  terminal: false,
+  terminal: true,
 }
 ```
 
-So today an agent may read and write files through Pulsar, but must run any
-commands in its own process.
+So today an agent may read and write files through Pulsar, and run commands in a
+terminal whose output is shown in the panel.
 
 ## Conversation & sessions
 
@@ -82,7 +82,7 @@ commands in its own process.
 | `session/request_permission` | ✅ | Allow/Reject prompt rendered in the panel; auto-cancels on restart/exit. |
 | `fs/read_text_file` | ✅ | Served only inside the working directory; prefers unsaved editor-buffer contents. |
 | `fs/write_text_file` | ✅ | Working-dir-scoped; refuses to clobber unsaved changes. |
-| `terminal/*` | ⬜ | Declined today. **Planned.** Implementing `terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/release`, and `terminal/kill` would let cooperating agents run commands *through* Pulsar — visible, gated, and killable — instead of silently in their own process. See [Security](README.md#security). |
+| `terminal/*` | ✅ | Implements `terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/release`, and `terminal/kill`. Commands run via `cross-spawn` from the session working directory (an absolute `cwd` outside it is refused), with merged stdout+stderr shown in a `<pre>` and capped by `outputByteLimit`. No per-command approval gate — see [Security](README.md#security). |
 
 ## Agent configuration
 
@@ -97,12 +97,11 @@ commands in its own process.
 
 ## Suggested priorities
 
-1. **Terminals** (`terminal/*`) — the agreed next capability; makes command execution visible and gated. *(Largest change, highest user impact.)*
-2. **Session load + list** — restore and reopen past conversations; the deserializer groundwork is already in place.
-3. **Slash commands** (`available_commands_update`) — cheap, high-value UX; surfaces agent-native commands.
-4. **Session modes / model selection** — let users drive the agent's built-in options instead of only seeing them.
-5. **Rich prompt content** — attach the current file/selection or images.
-6. **Logout** — account switching without a restart.
+1. **Session load + list** — restore and reopen past conversations; the deserializer groundwork is already in place.
+2. **Slash commands** (`available_commands_update`) — cheap, high-value UX; surfaces agent-native commands.
+3. **Session modes / model selection** — let users drive the agent's built-in options instead of only seeing them.
+4. **Rich prompt content** — attach the current file/selection or images.
+5. **Logout** — account switching without a restart.
 
 ## How Zed does it
 

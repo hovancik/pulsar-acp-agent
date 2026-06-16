@@ -87,7 +87,7 @@ The SDK is ESM-only, so esbuild bundles it and `zod` into `lib/main.js`.
 | --- | --- |
 | `fs.readTextFile` / `fs.writeTextFile` | yes, restricted to the session working directory |
 | `session/request_permission` | yes |
-| `terminal` | no |
+| `terminal` | yes, commands run from the session working directory |
 | `authenticate` | yes, uses the first auth method advertised by the agent |
 
 ## Security
@@ -103,9 +103,12 @@ over ACP. They do not restrict what the agent does in its own process:
   path resolves inside the session working directory; the agent reads and writes
   there without a per-action prompt.
 - Writes to open files with unsaved changes are refused.
-- The ACP `terminal` capability is declined, so the agent cannot run commands
-  *through Pulsar*. Most agents still ship their own shell and run commands
-  directly in their own process, outside Pulsar's view.
+- The ACP `terminal` capability is accepted: the agent can run commands *through*
+  Pulsar, with their merged output shown in the panel. Commands launch from the
+  session working directory (an absolute `cwd` outside it is refused) and run as
+  separate processes with your user account. There is **no per-command approval
+  prompt** and no sandbox — a launched command can do anything your account can.
+  Terminals are killed when you Stop a turn, restart, or close the panel.
 
 These are guard rails for a cooperating agent, not a security boundary: a
 malicious agent can read or write any file your account can, or run any command,
