@@ -1,4 +1,5 @@
 import { ChildProcess } from "child_process";
+import { randomUUID } from "crypto";
 import spawn from "cross-spawn";
 import * as fs from "fs";
 import * as path from "path";
@@ -10,6 +11,9 @@ declare const __PULSAR_ACP_AGENT_VERSION__: string;
 
 export const PROTOCOL_VERSION = acp.PROTOCOL_VERSION;
 const STARTUP_TIMEOUT_MS = 30_000;
+const DEFAULT_OUTPUT_BYTE_LIMIT = 64 * 1024;
+const MAX_OUTPUT_BYTE_LIMIT = 1024 * 1024;
+const TERMINAL_KILL_GRACE_MS = 2_000;
 const CLIENT_INFO = {
   name: "pulsar-acp-agent",
   title: "Pulsar ACP Agent",
@@ -33,6 +37,7 @@ export type AgentEvent =
       respond: (outcome: acp.RequestPermissionResponse) => void;
     }
   | { type: "file-written"; path: string }
+  | { type: "terminal-output"; terminalId: string; output: string }
   | { type: "stderr"; text: string }
   | { type: "error"; message: string }
   | { type: "exit"; code: number | null; signal: string | null };
@@ -83,6 +88,143 @@ function parseCommandLine(line: string): string[] {
   return tokens;
 }
 
+// Builds an Error carrying a JSON-RPC error code for the ACP transport.
+function rpcError(message: string, code: number): Error {
+  const error = new Error(message) as Error & { code?: number };
+  error.code = code;
+  return error;
+}
+
+// True when `target` is one of `roots` or nested beneath one of them.
+function isInsideRoots(target: string, roots: string[]): boolean {
+  return roots.some((root) => {
+    const rel = path.relative(root, target);
+    return !rel.startsWith("..") && !path.isAbsolute(rel);
+  });
+}
+
+// Holds a spawned terminal process plus its ring-buffered output. Output is a
+// single merged stdout+stderr buffer truncated from the beginning (oldest
+// dropped) once it exceeds the byte limit, kept at a UTF-8 + line boundary.
+class TerminalRecord {
+  truncated = false;
+  exitStatus: acp.TerminalExitStatus | null = null;
+  private chunkList: Buffer[] = [];
+  private totalLength = 0;
+  private waitResolvers = new Set<(status: acp.TerminalExitStatus) => void>();
+  private emitScheduled = false;
+
+  constructor(
+    readonly child: ChildProcess,
+    private readonly outputByteLimit: number,
+    private readonly onOutput: () => void,
+  ) {}
+
+  append(chunk: Buffer): void {
+    this.chunkList.push(chunk);
+    this.totalLength += chunk.length;
+
+    if (this.totalLength > this.outputByteLimit) {
+      let combined = Buffer.concat(this.chunkList);
+      let start = combined.length - this.outputByteLimit;
+      while (start < combined.length && (combined[start] & 0xc0) === 0x80) {
+        start++;
+      }
+      const newline = combined.indexOf(0x0a, start);
+      if (newline !== -1 && newline + 1 < combined.length) {
+        start = newline + 1;
+      }
+      this.chunkList = [combined.subarray(start)];
+      this.totalLength = this.chunkList[0].length;
+      this.truncated = true;
+    }
+    this.scheduleEmit();
+  }
+
+  // Coalesce UI emits: a chatty command produces thousands of small chunks, and
+  // re-rendering the full buffer on each one causes jank. Pull-based
+  // `terminal/output` still reads `output()` directly, so it stays current.
+  private scheduleEmit(): void {
+    if (this.emitScheduled) return;
+    this.emitScheduled = true;
+    setTimeout(() => {
+      this.emitScheduled = false;
+      this.onOutput();
+    }, 33);
+  }
+
+  flushOutput(): void {
+    this.onOutput();
+  }
+
+  output(): string {
+    if (this.chunkList.length > 1) {
+      this.chunkList = [Buffer.concat(this.chunkList)];
+    }
+    return this.chunkList.length > 0 ? this.chunkList[0].toString("utf8") : "";
+  }
+
+  resolveExit(status: acp.TerminalExitStatus): void {
+    if (!this.exitStatus) this.exitStatus = status;
+    this.releaseWaiters();
+  }
+
+  // Unblocks pending `waitForExit` callers without recording a synthetic exit
+  // status, so the kill-escalation timer in `killProcess` can still fire when a
+  // terminal is released while its process is still being torn down.
+  releaseWaiters(): void {
+    const status = this.exitStatus ?? { exitCode: null, signal: null };
+    for (const resolve of this.waitResolvers) resolve(status);
+    this.waitResolvers.clear();
+  }
+
+  waitForExit(): Promise<acp.TerminalExitStatus> {
+    if (this.exitStatus) return Promise.resolve(this.exitStatus);
+    return new Promise((resolve) => this.waitResolvers.add(resolve));
+  }
+
+  // SIGTERM, then SIGKILL after a grace period. On POSIX the child is spawned
+  // detached so the whole process group can be signalled; on Windows use
+  // `taskkill /t` to terminate the whole process tree (graceful, then forced),
+  // since `child.kill()` would only terminate the root and orphan descendants.
+  killProcess(): void {
+    const pid = this.child.pid;
+    if (pid == null || this.exitStatus) return;
+    if (process.platform === "win32") {
+      this.runTaskkill(pid, false);
+      setTimeout(() => {
+        if (this.exitStatus) return;
+        this.runTaskkill(pid, true);
+      }, TERMINAL_KILL_GRACE_MS);
+      return;
+    }
+    this.signalGroup(pid, "SIGTERM");
+    setTimeout(() => {
+      if (this.exitStatus) return;
+      this.signalGroup(pid, "SIGKILL");
+    }, TERMINAL_KILL_GRACE_MS);
+  }
+
+  private runTaskkill(pid: number, force: boolean): void {
+    const args = ["/pid", String(pid), "/t"];
+    if (force) args.push("/f");
+    try {
+      const killer = spawn("taskkill", args, { windowsHide: true });
+      killer.on("error", () => {});
+    } catch {}
+  }
+
+  private signalGroup(pid: number, signal: NodeJS.Signals): void {
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      try {
+        this.child.kill(signal);
+      } catch {}
+    }
+  }
+}
+
 export class AgentSession {
   private listeners = new Set<Listener>();
   private connection: acp.ClientSideConnection | null = null;
@@ -95,6 +237,7 @@ export class AgentSession {
   private permissionResolvers = new Set<
     (outcome: acp.RequestPermissionResponse) => void
   >();
+  private terminals = new Map<string, TerminalRecord>();
 
   onEvent(callback: Listener): { dispose: () => void } {
     this.listeners.add(callback);
@@ -134,6 +277,7 @@ export class AgentSession {
       this.connection = null;
       this.sessionCwd = null;
       this.cancelPendingPermissions();
+      this.cleanupTerminals();
     }
 
     const commandLine: string =
@@ -170,10 +314,11 @@ export class AgentSession {
             ? `Could not find "${command}". Install it and/or set its path in the Agent package settings.`
             : `Agent process error: ${error.message}`;
         this.cancelPendingPermissions();
-        this.emit({ type: "error", message });
         reject(new Error(message));
       });
     });
+    // Prevent unhandled rejection crash if error fires after startup completes
+    processError.catch(() => {});
 
     stderr.setEncoding("utf8");
     stderr.on("data", (text: string) =>
@@ -189,6 +334,7 @@ export class AgentSession {
       this.starting = null;
       this.running = false;
       this.cancelPendingPermissions();
+      this.cleanupTerminals();
       this.emit({ type: "exit", code, signal });
     });
 
@@ -210,7 +356,7 @@ export class AgentSession {
           clientInfo: CLIENT_INFO,
           clientCapabilities: {
             fs: { readTextFile: true, writeTextFile: true },
-            terminal: false,
+            terminal: true,
           },
         }),
         processError,
@@ -298,9 +444,9 @@ export class AgentSession {
   async prompt(text: string): Promise<acp.PromptResponse> {
     if (this.running) throw new Error("The agent is already responding.");
     this.running = true;
-    this.emit({ type: "turn-start" });
     try {
       await this.start();
+      this.emit({ type: "turn-start" });
       if (!this.connection || !this.sessionId) {
         throw new Error("Agent session is not ready.");
       }
@@ -310,6 +456,9 @@ export class AgentSession {
       });
       this.emit({ type: "turn-end", stopReason: result?.stopReason });
       return result;
+    } catch (error) {
+      this.emit({ type: "turn-end" });
+      throw error;
     } finally {
       this.running = false;
     }
@@ -323,6 +472,8 @@ export class AgentSession {
           type: "error",
           message: `Failed to cancel agent turn: ${message}`,
         });
+        this.running = false;
+        this.emit({ type: "turn-end" });
       });
     } else if (this.child) {
       this.child.kill("SIGTERM");
@@ -351,6 +502,20 @@ export class AgentSession {
         await this.writeTextFile(params);
         return {};
       },
+      createTerminal: async (params: acp.CreateTerminalRequest) =>
+        this.createTerminal(params),
+      terminalOutput: async (params: acp.TerminalOutputRequest) =>
+        this.terminalOutput(params),
+      waitForTerminalExit: async (params: acp.WaitForTerminalExitRequest) =>
+        this.waitForTerminalExit(params),
+      killTerminal: async (params: acp.KillTerminalRequest) => {
+        this.getTerminal(params.sessionId, params.terminalId).killProcess();
+        return {};
+      },
+      releaseTerminal: async (params: acp.ReleaseTerminalRequest) => {
+        this.releaseTerminal(params);
+        return {};
+      },
     };
   }
 
@@ -368,6 +533,130 @@ export class AgentSession {
     });
   }
 
+  private async createTerminal(
+    params: acp.CreateTerminalRequest,
+  ): Promise<acp.CreateTerminalResponse> {
+    this.assertSessionId(params.sessionId);
+    const cwd = await this.terminalCwd(params.cwd);
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) env[key] = value;
+    }
+    for (const item of params.env ?? []) env[item.name] = item.value;
+    env.PAGER = "";
+    env.GIT_PAGER = "cat";
+
+    const child = spawn(params.command, params.args ?? [], {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+      windowsHide: true,
+    });
+
+    const limit = Math.max(
+      1,
+      Math.min(
+        params.outputByteLimit ?? DEFAULT_OUTPUT_BYTE_LIMIT,
+        MAX_OUTPUT_BYTE_LIMIT,
+      ),
+    );
+    const terminalId = randomUUID();
+    const record = new TerminalRecord(child, limit, () =>
+      this.emit({
+        type: "terminal-output",
+        terminalId,
+        output: record.output(),
+      }),
+    );
+    this.terminals.set(terminalId, record);
+
+    child.stdout?.on("data", (chunk: Buffer) => record.append(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => record.append(chunk));
+    child.on("error", (error: Error) => {
+      record.append(Buffer.from(`\n[pulsar-acp-agent] ${error.message}\n`));
+      record.resolveExit({ exitCode: null, signal: null });
+      record.flushOutput();
+    });
+    child.on("exit", (code, signal) => {
+      record.resolveExit({ exitCode: code, signal });
+      record.flushOutput();
+    });
+
+    return { terminalId };
+  }
+
+  private terminalOutput(
+    params: acp.TerminalOutputRequest,
+  ): acp.TerminalOutputResponse {
+    const record = this.getTerminal(params.sessionId, params.terminalId);
+    return {
+      output: record.output(),
+      truncated: record.truncated,
+      exitStatus: record.exitStatus,
+    };
+  }
+
+  private async waitForTerminalExit(
+    params: acp.WaitForTerminalExitRequest,
+  ): Promise<acp.WaitForTerminalExitResponse> {
+    const record = this.getTerminal(params.sessionId, params.terminalId);
+    const status = await record.waitForExit();
+    return { exitCode: status.exitCode, signal: status.signal };
+  }
+
+  private releaseTerminal(params: acp.ReleaseTerminalRequest): void {
+    const record = this.getTerminal(params.sessionId, params.terminalId);
+    record.killProcess();
+    record.releaseWaiters();
+    this.terminals.delete(params.terminalId);
+  }
+
+  private getTerminal(
+    sessionId: acp.SessionId,
+    terminalId: string,
+  ): TerminalRecord {
+    this.assertSessionId(sessionId);
+    const record = this.terminals.get(terminalId);
+    if (!record) {
+      throw rpcError(`Unknown terminal: ${terminalId}`, -32602);
+    }
+    return record;
+  }
+
+  private async terminalCwd(requested: string | null | undefined): Promise<string> {
+    if (requested == null || requested.trim() === "") {
+      if (!this.sessionCwd) {
+        throw new Error("Agent session working directory is not ready.");
+      }
+      return this.sessionCwd;
+    }
+    if (!path.isAbsolute(requested)) {
+      throw rpcError(
+        `Terminal working directory must be an absolute path: ${requested}`,
+        -32602,
+      );
+    }
+    const real = await fs.promises.realpath(requested);
+    const stat = await fs.promises.stat(real);
+    const roots = await this.allowedRealRoots();
+    if (!stat.isDirectory() || !isInsideRoots(real, roots)) {
+      throw rpcError(
+        `Refusing to launch a terminal outside the project: ${requested}`,
+        -32002,
+      );
+    }
+    return real;
+  }
+
+  private cleanupTerminals(): void {
+    for (const record of this.terminals.values()) {
+      record.killProcess();
+      record.releaseWaiters();
+    }
+    this.terminals.clear();
+  }
+
   private async readTextFile(
     params: acp.ReadTextFileRequest,
   ): Promise<acp.ReadTextFileResponse> {
@@ -379,7 +668,7 @@ export class AgentSession {
       : await fs.promises.readFile(params.path, "utf8");
 
     if (params.line != null || params.limit != null) {
-      const lines = content.split("\n");
+      const lines = content.replace(/\r\n/g, "\n").split("\n");
       const start = params.line != null ? Math.max(0, params.line - 1) : 0;
       const end = params.limit != null ? start + params.limit : lines.length;
       content = lines.slice(start, end).join("\n");
@@ -428,17 +717,17 @@ export class AgentSession {
 
   private assertSessionId(sessionId: acp.SessionId): void {
     if (this.sessionId === sessionId) return;
-    const error = new Error(
+    throw rpcError(
       `Rejecting request for unknown ACP session: ${sessionId}`,
-    ) as Error & { code?: number };
-    error.code = -32002;
-    throw error;
+      -32002,
+    );
   }
 
   private withStartupTimeout<T>(promise: Promise<T>, step: string): Promise<T> {
+    let currentChild = this.child;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        if (this.child) this.child.kill("SIGTERM");
+        if (this.child === currentChild && currentChild) currentChild.kill("SIGTERM");
         reject(
           new Error(`Timed out during ${step}. Press Restart and try again.`),
         );
@@ -465,15 +754,11 @@ export class AgentSession {
       ? await this.realPathForWrite(filePath)
       : await fs.promises.realpath(filePath);
     const roots = await this.allowedRealRoots();
-    const isAllowed = roots.some(
-      (root) => target === root || target.startsWith(root + path.sep),
-    );
-    if (!isAllowed) {
-      const error = new Error(
+    if (!isInsideRoots(target, roots)) {
+      throw rpcError(
         `Refusing to access path outside the project: ${filePath}`,
-      ) as Error & { code?: number };
-      error.code = -32002;
-      throw error;
+        -32002,
+      );
     }
   }
 
@@ -497,7 +782,7 @@ export class AgentSession {
           return path.join(realParent, path.relative(parent, target));
         } catch {
           const next = path.dirname(parent);
-          if (next === parent) {
+          if (next === parent || parent.length <= 3) {
             throw new Error(`Cannot resolve parent for ${filePath}`);
           }
           parent = next;
@@ -510,7 +795,7 @@ export class AgentSession {
     const absolutePath = path.resolve(filePath);
     return atom.workspace.getTextEditors().find((item) => {
       const itemPath = item.getPath();
-      return itemPath != null && path.resolve(itemPath) === absolutePath;
+      return itemPath != null && path.relative(path.resolve(itemPath), absolutePath) === "";
     });
   }
 
@@ -525,8 +810,10 @@ export class AgentSession {
       try {
         this.child.kill("SIGTERM");
       } catch {}
+      this.child = null;
     }
     this.sessionCwd = null;
+    this.cleanupTerminals();
     this.listeners.clear();
   }
 }
