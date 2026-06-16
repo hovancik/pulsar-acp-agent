@@ -186,16 +186,70 @@
   border-top: 1px solid @pane-item-border-color;
   padding: (@component-padding / 2) @component-padding;
 
+  &.pulsar-acp-agent-footer--drag-over {
+    background-color: @background-color-info;
+    opacity: 0.85;
+  }
+
   .pulsar-acp-agent-input {
     width: 100%;
     resize: vertical;
     font-family: inherit;
+    background-color: @input-background-color;
+    color: @text-color;
+    border: 1px solid @input-border-color;
+    border-radius: @component-border-radius;
   }
 
   .pulsar-acp-agent-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 6px;
-    margin-top: 6px;
+    gap: (@component-padding / 2);
+    margin-top: (@component-padding / 2);
   }
+}
+
+.pulsar-acp-agent-thumbnails {
+  display: flex;
+  flex-wrap: wrap;
+  gap: (@component-padding / 2);
+  padding-bottom: (@component-padding / 2);
+}
+
+.pulsar-acp-agent-thumbnail {
+  position: relative;
+  display: inline-block;
+
+  img {
+    display: block;
+    max-width: 64px;
+    max-height: 64px;
+    border-radius: @component-border-radius;
+    border: 1px solid @pane-item-border-color;
+  }
+
+  .pulsar-acp-agent-thumbnail-remove {
+    position: absolute;
+    top: -(@component-padding / 2);
+    right: -(@component-padding / 2);
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    line-height: 14px;
+    font-size: 11px;
+    border-radius: 50%;
+    background: @background-color-error;
+    color: @text-color-highlight;
+    border: none;
+    cursor: pointer;
+    text-align: center;
+  }
+}
+
+.pulsar-acp-agent-inline-image {
+  display: block;
+  max-width: 100%;
+  max-height: 300px;
+  margin-top: (@component-padding / 2);
+  border-radius: @component-border-radius;
 }

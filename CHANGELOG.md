@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added ACP `terminal/*` capability.
+- Added image attachment support for PNG, JPEG, GIF, and WebP files up to 5 MiB.
+
+### Fixed
+
+- Input textarea now uses theme variables instead of browser defaults.
 
 ## [0.1.0] - 2026-06-15
 
