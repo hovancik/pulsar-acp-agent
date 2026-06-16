@@ -57,6 +57,11 @@ Wrap a path that contains spaces in double quotes, e.g.
 If the agent advertises image prompt support, attach PNG, JPEG, GIF, or WebP
 images up to 5 MiB via the attachment button, drag-and-drop, or paste.
 
+If the agent advertises `session/list` support, a **Sessions** bar appears at
+the top of the panel. Click it to expand the list of past sessions and switch
+between them. If the agent also advertises `session/delete`, a `×` button
+appears on hover to permanently remove a session.
+
 The session working directory defaults to the first open project folder.
 Multi-root workspaces are not supported yet: only the configured working
 directory, or the first open project folder when no directory is configured, is

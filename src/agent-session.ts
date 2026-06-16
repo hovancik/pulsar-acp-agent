@@ -28,10 +28,11 @@ export type AgentEvent =
       authMethods: acp.AuthMethod[];
       supportsImages: boolean;
     }
-  | { type: "ready"; session: acp.NewSessionResponse }
+  | { type: "ready"; session: acp.NewSessionResponse; source: "start" | "new" | "load" }
+  | { type: "session-list"; sessions: acp.SessionInfo[] }
   | { type: "turn-start" }
   | { type: "turn-end"; stopReason?: acp.StopReason }
-  | { type: "update"; update: acp.SessionUpdate }
+  | { type: "update"; sessionId: acp.SessionId; update: acp.SessionUpdate }
   | {
       type: "permission";
       params: acp.RequestPermissionRequest;
@@ -81,7 +82,11 @@ export class AgentSession {
   private child: ChildProcess | null = null;
   sessionId: string | null = null;
   running = false;
+  switching = false;
+  private pendingSessionId: string | null = null;
+  private sessionListGeneration = 0;
   private authMethods: acp.AuthMethod[] = [];
+  private agentCapabilities: acp.AgentCapabilities | null = null;
   private promptCapabilities: acp.PromptCapabilities | null = null;
   private sessionCwd: string | null = null;
   private starting: Promise<void> | null = null;
@@ -184,6 +189,9 @@ export class AgentSession {
       this.sessionCwd = null;
       this.starting = null;
       this.running = false;
+      this.switching = false;
+      this.pendingSessionId = null;
+      this.agentCapabilities = null;
       this.promptCapabilities = null;
       this.cancelPendingPermissions();
       this.cleanupTerminals();
@@ -222,6 +230,7 @@ export class AgentSession {
       );
     }
     this.authMethods = init.authMethods || [];
+    this.agentCapabilities = init.agentCapabilities ?? null;
     this.promptCapabilities = init.agentCapabilities?.promptCapabilities ?? null;
     this.emit({
       type: "initialized",
@@ -267,8 +276,9 @@ export class AgentSession {
     }
     this.sessionId = session.sessionId;
     this.sessionCwd = cwd;
-    this.emit({ type: "ready", session });
+    this.emit({ type: "ready", session, source: "start" });
     this.emit({ type: "status", text: this.readyStatus(session) });
+    this.refreshSessionList();
   }
 
   private cwd(): string {
@@ -361,7 +371,13 @@ export class AgentSession {
   private buildClient(): acp.Client {
     return {
       sessionUpdate: async (params: acp.SessionNotification) => {
-        this.emit({ type: "update", update: params.update });
+        const expectedId = this.pendingSessionId ?? this.sessionId;
+        if (params.sessionId !== expectedId) return;
+        this.emit({
+          type: "update",
+          sessionId: params.sessionId,
+          update: params.update,
+        });
       },
       requestPermission: async (params: acp.RequestPermissionRequest) =>
         this.requestPermission(params),
@@ -631,12 +647,39 @@ export class AgentSession {
     }
   }
 
-  private async allowedRealRoots(): Promise<string[]> {
-    if (!this.sessionCwd) {
+  private async allowedRealRoots(cwd: string | null = this.sessionCwd): Promise<string[]> {
+    if (!cwd) {
       throw new Error("Agent session working directory is not ready.");
     }
-    const root = path.resolve(this.sessionCwd);
+    const root = path.resolve(cwd);
     return [await fs.promises.realpath(root).catch(() => root)];
+  }
+
+  private async assertSessionCwdAllowed(
+    cwd: string,
+    action: "load" | "delete",
+  ): Promise<void> {
+    if (!path.isAbsolute(cwd)) {
+      throw new Error(
+        `Refusing to ${action} session with non-absolute working directory: ${cwd}`,
+      );
+    }
+    const roots = await this.allowedRealRoots();
+    const target = await fs.promises.realpath(cwd).catch(() => path.resolve(cwd));
+    if (!isInsideRoots(target, roots)) {
+      throw new Error(`Refusing to ${action} session outside the project: ${cwd}`);
+    }
+  }
+
+  private async sessionInfoAllowed(
+    info: acp.SessionInfo,
+    roots: string[],
+  ): Promise<boolean> {
+    if (!path.isAbsolute(info.cwd)) return false;
+    const target = await fs.promises.realpath(info.cwd).catch(() =>
+      path.resolve(info.cwd),
+    );
+    return isInsideRoots(target, roots);
   }
 
   private async realPathForWrite(filePath: string): Promise<string> {
@@ -666,6 +709,140 @@ export class AgentSession {
       const itemPath = item.getPath();
       return itemPath != null && path.relative(path.resolve(itemPath), absolutePath) === "";
     });
+  }
+
+  canListSessions(): boolean {
+    return this.agentCapabilities?.sessionCapabilities?.list != null;
+  }
+
+  canLoadSession(): boolean {
+    return this.agentCapabilities?.loadSession === true;
+  }
+
+  canDeleteSession(): boolean {
+    return this.agentCapabilities?.sessionCapabilities?.delete != null;
+  }
+
+  async deleteSession(
+    id: string,
+    cwd?: string,
+  ): Promise<{ deletedActive: boolean }> {
+    if (!this.connection) throw new Error("Agent is not connected.");
+    if (!this.canDeleteSession()) throw new Error("The agent does not support deleting sessions.");
+    if (this.running || this.switching) throw new Error("The agent is already responding.");
+
+    this.switching = true;
+    try {
+      const deletedActive = id === this.sessionId;
+      const scopedCwd = cwd ?? (deletedActive ? this.sessionCwd : null);
+      if (!scopedCwd) {
+        throw new Error(
+          `Refusing to delete session without a known working directory: ${id}`,
+        );
+      }
+      await this.assertSessionCwdAllowed(scopedCwd, "delete");
+      await this.connection.deleteSession({ sessionId: id });
+      if (deletedActive) {
+        this.sessionId = null;
+        this.cleanupTerminals();
+      }
+      this.refreshSessionList();
+      return { deletedActive };
+    } finally {
+      this.switching = false;
+    }
+  }
+
+  async newSession(): Promise<void> {
+    if (!this.connection) throw new Error("Agent is not connected.");
+    if (this.running || this.switching) throw new Error("The agent is already responding.");
+    this.switching = true;
+    try {
+      const cwd = this.cwd();
+      const session = await this.connection.newSession({ cwd, mcpServers: [] });
+      this.sessionId = session.sessionId;
+      this.sessionCwd = cwd;
+      this.cleanupTerminals();
+      this.emit({ type: "ready", session, source: "new" });
+      this.emit({ type: "status", text: this.readyStatus(session) });
+      this.refreshSessionList();
+    } finally {
+      this.switching = false;
+    }
+  }
+
+  activateCachedSession(id: string): void {
+    this.sessionId = id;
+    this.cleanupTerminals();
+    const fakeSession = { sessionId: id } as acp.NewSessionResponse;
+    this.emit({ type: "ready", session: fakeSession, source: "load" });
+    this.emit({ type: "status", text: "Ready" });
+    this.refreshSessionList();
+  }
+
+  async loadSession(id: string, cwd?: string): Promise<void> {
+    if (!this.connection) throw new Error("Agent is not connected.");
+    if (this.running || this.switching) throw new Error("The agent is already responding.");
+    if (!this.canLoadSession()) {
+      throw new Error("The agent does not support loading sessions.");
+    }
+    this.switching = true;
+    this.pendingSessionId = id;
+    try {
+      const sessionCwd = cwd ?? this.cwd();
+      await this.assertSessionCwdAllowed(sessionCwd, "load");
+      await this.connection.loadSession({
+        sessionId: id,
+        cwd: sessionCwd,
+        mcpServers: [],
+      });
+      this.sessionId = id;
+      this.pendingSessionId = null;
+      this.sessionCwd = sessionCwd;
+      this.cleanupTerminals();
+      const fakeSession = { sessionId: id } as acp.NewSessionResponse;
+      this.emit({ type: "ready", session: fakeSession, source: "load" });
+      this.emit({ type: "status", text: "Ready" });
+      this.refreshSessionList();
+    } catch (error) {
+      this.pendingSessionId = null;
+      throw error;
+    } finally {
+      this.switching = false;
+    }
+  }
+
+  refreshSessionList(): void {
+    if (!this.canListSessions()) return;
+    this.listSessions().catch((error) => {
+      console.error("[pulsar-acp-agent] session/list failed", error);
+    });
+  }
+
+  async listSessions(): Promise<void> {
+    if (!this.connection || !this.canListSessions()) return;
+    const generation = ++this.sessionListGeneration;
+    const cwd = this.sessionCwd ?? this.cwd();
+    const roots = await this.allowedRealRoots(cwd);
+    const sessions: acp.SessionInfo[] = [];
+    let cursor: string | null | undefined;
+    const seenCursors = new Set<string>();
+    do {
+      const response = await this.connection.listSessions(
+        cursor ? { cwd, cursor } : { cwd },
+      );
+      for (const session of response.sessions ?? []) {
+        if (await this.sessionInfoAllowed(session, roots)) {
+          sessions.push(session);
+        }
+      }
+      const nextCursor = response.nextCursor;
+      if (!nextCursor || seenCursors.has(nextCursor)) break;
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
+    } while (true);
+    if (generation !== this.sessionListGeneration) return;
+    this.emit({ type: "session-list", sessions });
   }
 
   dispose(): void {
