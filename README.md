@@ -54,6 +54,9 @@ Wrap a path that contains spaces in double quotes, e.g.
 - Stop: cancel current turn
 - Restart: kill and restart the agent process
 
+If the agent advertises image prompt support, attach PNG, JPEG, GIF, or WebP
+images up to 5 MiB via the attachment button, drag-and-drop, or paste.
+
 The session working directory defaults to the first open project folder.
 Multi-root workspaces are not supported yet: only the configured working
 directory, or the first open project folder when no directory is configured, is

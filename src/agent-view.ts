@@ -18,7 +18,20 @@ type ToolView = {
   body: HTMLElement;
 };
 
+type PendingImage = { id: number; data: string; mimeType: string; file: File };
+
 const STDERR_LIMIT = 4000;
+
+// Reject images above Zed's 5 MiB per-image cap; we don't downscale.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+const SUPPORTED_IMAGE_ACCEPT = Array.from(SUPPORTED_IMAGE_MIME_TYPES).join(",");
+const SUPPORTED_IMAGE_LABEL = "PNG, JPEG, GIF, or WebP";
 
 export class PulsarAcpAgentView {
   element!: HTMLElement;
@@ -35,10 +48,21 @@ export class PulsarAcpAgentView {
 
   private statusEl!: HTMLElement;
   private input!: HTMLTextAreaElement;
+  private fileInput!: HTMLInputElement;
+  private attachButton!: HTMLButtonElement;
+  private thumbnailStrip!: HTMLElement;
   private conversation!: HTMLElement;
   private sendButton!: HTMLButtonElement;
   private stopButton!: HTMLButtonElement;
   private restartButton!: HTMLButtonElement;
+
+  private pendingImages: PendingImage[] = [];
+  private pendingImageLoads = 0;
+  private imageLoadGeneration = 0;
+  private nextImageId = 1;
+  private preparingPrompt = false;
+  private imageSupportKnown = false;
+  private supportsImages = false;
 
   constructor() {
     this.subscriptions = new CompositeDisposable();
@@ -75,6 +99,20 @@ export class PulsarAcpAgentView {
     const footer = document.createElement("div");
     footer.classList.add("pulsar-acp-agent-footer");
 
+    this.thumbnailStrip = document.createElement("div");
+    this.thumbnailStrip.classList.add("pulsar-acp-agent-thumbnails");
+    this.thumbnailStrip.style.display = "none";
+
+    this.fileInput = document.createElement("input");
+    this.fileInput.type = "file";
+    this.fileInput.accept = SUPPORTED_IMAGE_ACCEPT;
+    this.fileInput.multiple = true;
+    this.fileInput.style.display = "none";
+    this.fileInput.addEventListener("change", () => {
+      if (this.fileInput.files) this.addImages(Array.from(this.fileInput.files));
+      this.fileInput.value = "";
+    });
+
     this.input = document.createElement("textarea");
     this.input.classList.add("pulsar-acp-agent-input", "native-key-bindings");
     this.input.setAttribute("rows", "3");
@@ -88,17 +126,66 @@ export class PulsarAcpAgentView {
         this.send();
       }
     });
+    this.input.addEventListener("paste", (event: ClipboardEvent) => {
+      const items = event.clipboardData?.items;
+      if (!items || !this.canAcceptImages()) return;
+      const imageFiles: File[] = [];
+      for (const item of Array.from(items)) {
+        if (this.isSupportedImageMimeType(item.type)) {
+          const file = item.getAsFile();
+          if (file) imageFiles.push(file);
+        }
+      }
+      if (imageFiles.length > 0) {
+        event.preventDefault();
+        this.addImages(imageFiles);
+      }
+    });
+
+    footer.addEventListener("dragover", (event: DragEvent) => {
+      if (!this.canAcceptImages()) return;
+      const hasImage = Array.from(event.dataTransfer?.items ?? []).some((i) =>
+        this.isSupportedImageMimeType(i.type),
+      );
+      if (!hasImage) return;
+      event.preventDefault();
+      footer.classList.add("pulsar-acp-agent-footer--drag-over");
+    });
+    footer.addEventListener("dragleave", () => {
+      footer.classList.remove("pulsar-acp-agent-footer--drag-over");
+    });
+    footer.addEventListener("drop", (event: DragEvent) => {
+      footer.classList.remove("pulsar-acp-agent-footer--drag-over");
+      if (!this.canAcceptImages()) return;
+      event.preventDefault();
+      const files = Array.from(event.dataTransfer?.files ?? []).filter((f) =>
+        this.isSupportedImageMimeType(f.type),
+      );
+      if (files.length > 0) this.addImages(files);
+    });
 
     const actions = document.createElement("div");
     actions.classList.add("pulsar-acp-agent-actions");
+    this.attachButton = document.createElement("button");
+    this.attachButton.classList.add(
+      "btn",
+      "icon",
+      "icon-file-media",
+      "pulsar-acp-agent-attach",
+    );
+    this.attachButton.title = "Attach image (or drag-and-drop / paste)";
+    this.attachButton.addEventListener("click", () => this.fileInput.click());
     this.sendButton = this.makeButton("Send", () => this.send());
     this.sendButton.classList.add("pulsar-acp-agent-send");
     this.stopButton = this.makeButton("Stop", () => this.session.cancel());
     this.stopButton.classList.add("pulsar-acp-agent-stop");
     this.stopButton.disabled = true;
+    actions.appendChild(this.attachButton);
     actions.appendChild(this.stopButton);
     actions.appendChild(this.sendButton);
 
+    footer.appendChild(this.fileInput);
+    footer.appendChild(this.thumbnailStrip);
     footer.appendChild(this.input);
     footer.appendChild(actions);
 
@@ -116,18 +203,60 @@ export class PulsarAcpAgentView {
   }
 
   private send(): void {
+    void this.sendPrompt();
+  }
+
+  private async sendPrompt(): Promise<void> {
     const text = this.input.value.trim();
-    if (text.length === 0 || this.session.running) return;
+    if (
+      (text.length === 0 && this.pendingImages.length === 0) ||
+      this.session.running ||
+      this.preparingPrompt ||
+      this.pendingImageLoads > 0
+    )
+      return;
+
+    const currentSession = this.session;
+    if (this.pendingImages.length > 0) {
+      this.preparingPrompt = true;
+      this.updateInputControls();
+
+      try {
+        await this.session.start();
+        if (this.session !== currentSession) return;
+        if (!this.session.supportsImages()) {
+          this.appendError(
+            "The configured agent does not support image prompts; images were not sent.",
+          );
+          this.pendingImages = [];
+          this.clearThumbnails();
+          return;
+        }
+      } catch (error) {
+        if (this.session === currentSession)
+          this.appendError(
+            error instanceof Error ? error.message : String(error),
+          );
+        return;
+      } finally {
+        if (this.session === currentSession) {
+          this.preparingPrompt = false;
+          this.updateInputControls();
+        }
+      }
+    }
+
+    const images = this.pendingImages.splice(0);
     this.input.value = "";
-    this.appendMessage("user", text);
+    this.clearThumbnails();
+    this.appendUserMessage(text, images);
     this.endStreamingBlocks();
     this.sendButton.disabled = true;
-    const currentSession = this.session;
-    this.session.prompt(text).catch((error) => {
+    this.session.prompt(text, images).catch((error) => {
       if (this.session !== currentSession) return;
       this.appendError(error.message || String(error));
-      this.sendButton.disabled = false;
       this.stopButton.disabled = true;
+      this.updateInputControls();
     });
   }
 
@@ -144,10 +273,18 @@ export class PulsarAcpAgentView {
     this.terminalOutputs.clear();
     this.planElement = null;
     this.stderrBody = null;
+    this.pendingImages = [];
+    this.pendingImageLoads = 0;
+    this.imageLoadGeneration++;
+    this.preparingPrompt = false;
+    this.imageSupportKnown = false;
+    this.supportsImages = false;
+    this.attachButton.style.display = "";
+    this.clearThumbnails();
     this.endStreamingBlocks();
     this.setStatus("Idle \u2014 type a message to start the agent.");
     this.stopButton.disabled = true;
-    this.sendButton.disabled = false;
+    this.updateInputControls();
   }
 
   private handleEvent(event: AgentEvent): void {
@@ -158,15 +295,19 @@ export class PulsarAcpAgentView {
       case "initialized":
         if (event.info && event.info.name)
           this.setStatus(`Connected to ${event.info.title || event.info.name}`);
+        this.imageSupportKnown = true;
+        this.supportsImages = event.supportsImages;
+        this.attachButton.style.display = event.supportsImages ? "" : "none";
+        this.updateInputControls();
         break;
       case "turn-start":
         this.stopButton.disabled = false;
-        this.sendButton.disabled = true;
+        this.updateInputControls();
         this.stderrBody = null;
         break;
       case "turn-end":
         this.stopButton.disabled = true;
-        this.sendButton.disabled = false;
+        this.updateInputControls();
         this.endStreamingBlocks();
         if (event.stopReason && event.stopReason !== "end_turn") {
           this.appendNote(`Turn stopped: ${event.stopReason}`);
@@ -191,14 +332,14 @@ export class PulsarAcpAgentView {
       case "error":
         this.appendError(event.message);
         this.stopButton.disabled = true;
-        this.sendButton.disabled = false;
+        this.updateInputControls();
         break;
       case "exit":
         this.setStatus(
           `Agent exited${event.code != null ? ` (code ${event.code})` : ""}. Press Restart.`,
         );
         this.stopButton.disabled = true;
-        this.sendButton.disabled = false;
+        this.updateInputControls();
         this.endStreamingBlocks();
         break;
     }
@@ -309,6 +450,144 @@ export class PulsarAcpAgentView {
     this.conversation.appendChild(message);
     this.scrollToBottom();
     return body;
+  }
+
+  private appendUserMessage(
+    text: string,
+    images: PendingImage[],
+  ): void {
+    const body = this.appendMessage("user", text);
+    for (const img of images) {
+      body.appendChild(
+        this.createImageCanvas(img.file, "pulsar-acp-agent-inline-image"),
+      );
+    }
+  }
+
+  private addImages(files: File[]): void {
+    if (!this.canAcceptImages()) return;
+    for (const file of files) {
+      if (!this.isSupportedImageMimeType(file.type)) {
+        this.appendError(
+          `"${file.name}" is not a supported image ` +
+            `(${SUPPORTED_IMAGE_LABEL}) and was not attached.`,
+        );
+        continue;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        this.appendError(
+          `"${file.name}" is larger than 5 MB and was not attached.`,
+        );
+        continue;
+      }
+      const generation = this.imageLoadGeneration;
+      const reader = new FileReader();
+      this.pendingImageLoads++;
+      this.updateInputControls();
+      reader.onload = () => {
+        if (generation !== this.imageLoadGeneration) {
+          return;
+        }
+        if (!(reader.result instanceof ArrayBuffer)) {
+          this.appendError(`Could not read image "${file.name}".`);
+          return;
+        }
+        const bytes = new Uint8Array(reader.result);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++)
+          binary += String.fromCharCode(bytes[i]);
+        const image = {
+          id: this.nextImageId++,
+          data: btoa(binary),
+          mimeType: file.type,
+          file,
+        };
+        this.pendingImages.push(image);
+        this.renderThumbnail(image);
+      };
+      reader.onerror = () => {
+        if (generation === this.imageLoadGeneration)
+          this.appendError(`Could not read image "${file.name}".`);
+      };
+      reader.onloadend = () => {
+        if (generation !== this.imageLoadGeneration) return;
+        this.pendingImageLoads--;
+        this.updateInputControls();
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  }
+
+  private renderThumbnail(image: PendingImage): void {
+    this.thumbnailStrip.style.display = "";
+    const wrapper = document.createElement("div");
+    wrapper.classList.add("pulsar-acp-agent-thumbnail");
+    const canvas = this.createImageCanvas(image.file);
+    const remove = document.createElement("button");
+    remove.classList.add("pulsar-acp-agent-thumbnail-remove");
+    remove.textContent = "\u00d7";
+    remove.title = "Remove image";
+    remove.addEventListener("click", () => {
+      const idx = this.pendingImages.findIndex((i) => i.id === image.id);
+      if (idx >= 0) this.pendingImages.splice(idx, 1);
+      wrapper.remove();
+      if (this.thumbnailStrip.children.length === 0)
+        this.thumbnailStrip.style.display = "none";
+      this.updateInputControls();
+    });
+    wrapper.appendChild(canvas);
+    wrapper.appendChild(remove);
+    this.thumbnailStrip.appendChild(wrapper);
+  }
+
+  private clearThumbnails(): void {
+    this.thumbnailStrip.innerHTML = "";
+    this.thumbnailStrip.style.display = "none";
+  }
+
+  private createImageCanvas(file: File, className?: string): HTMLCanvasElement {
+    const canvas = document.createElement("canvas");
+    if (className) canvas.classList.add(className);
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", file.name || "Attached image");
+    createImageBitmap(file)
+      .then((bitmap) => {
+        if (!canvas.isConnected) {
+          bitmap.close();
+          return;
+        }
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          bitmap.close();
+          return;
+        }
+        context.drawImage(bitmap, 0, 0);
+        bitmap.close();
+      })
+      .catch((error) =>
+        console.warn("[pulsar-acp-agent] image preview failed", error),
+      );
+    return canvas;
+  }
+
+  private canAcceptImages(): boolean {
+    return (
+      !this.session.running &&
+      !this.preparingPrompt &&
+      (!this.imageSupportKnown || this.supportsImages)
+    );
+  }
+
+  private isSupportedImageMimeType(mimeType: string): boolean {
+    return SUPPORTED_IMAGE_MIME_TYPES.has(mimeType.toLowerCase());
+  }
+
+  private updateInputControls(): void {
+    const busy = this.session.running || this.preparingPrompt;
+    this.sendButton.disabled = busy || this.pendingImageLoads > 0;
+    this.attachButton.disabled = busy || !this.canAcceptImages();
   }
 
   private appendNote(text: string): void {

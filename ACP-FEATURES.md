@@ -58,7 +58,7 @@ terminal whose output is shown in the panel.
 | ACP feature | Status | Notes |
 | --- | --- | --- |
 | Text prompts (`session/prompt`) | ✅ | We send a single `text` content block per turn. |
-| Rich prompt content — `image`, `audio`, `resource`, `resource_link` | ⬜ | Outgoing prompts are text-only. Agents advertise `promptCapabilities`; we could attach the active file/selection or images. |
+| Rich prompt content — `image`, `audio`, `resource`, `resource_link` | 🟡 | Outgoing image attachments via file picker, drag-and-drop, and paste are supported when the agent advertises `promptCapabilities.image`. `audio`, `resource`, and `resource_link` outgoing blocks are not yet sent. |
 | `@`-mention / embedded context | ⬜ | Reference files or symbols in a prompt as resource blocks. |
 | Incoming content rendering | 🟡 | `text` and `resource_link` render fully; `image` / `audio` / `resource` show as placeholders (`[image]`, …). |
 

@@ -26,6 +26,7 @@ export type AgentEvent =
       type: "initialized";
       info: acp.Implementation | null;
       authMethods: acp.AuthMethod[];
+      supportsImages: boolean;
     }
   | { type: "ready"; session: acp.NewSessionResponse }
   | { type: "turn-start" }
@@ -81,6 +82,7 @@ export class AgentSession {
   sessionId: string | null = null;
   running = false;
   private authMethods: acp.AuthMethod[] = [];
+  private promptCapabilities: acp.PromptCapabilities | null = null;
   private sessionCwd: string | null = null;
   private starting: Promise<void> | null = null;
   private permissionResolvers = new Set<
@@ -182,6 +184,7 @@ export class AgentSession {
       this.sessionCwd = null;
       this.starting = null;
       this.running = false;
+      this.promptCapabilities = null;
       this.cancelPendingPermissions();
       this.cleanupTerminals();
       this.emit({ type: "exit", code, signal });
@@ -219,10 +222,12 @@ export class AgentSession {
       );
     }
     this.authMethods = init.authMethods || [];
+    this.promptCapabilities = init.agentCapabilities?.promptCapabilities ?? null;
     this.emit({
       type: "initialized",
       info: init.agentInfo ?? null,
       authMethods: this.authMethods,
+      supportsImages: this.promptCapabilities?.image === true,
     });
 
     if (this.authMethods.length > 0) {
@@ -290,7 +295,14 @@ export class AgentSession {
     );
   }
 
-  async prompt(text: string): Promise<acp.PromptResponse> {
+  supportsImages(): boolean {
+    return this.promptCapabilities?.image === true;
+  }
+
+  async prompt(
+    text: string,
+    images?: Array<{ data: string; mimeType: string }>,
+  ): Promise<acp.PromptResponse> {
     if (this.running) throw new Error("The agent is already responding.");
     this.running = true;
     try {
@@ -299,9 +311,17 @@ export class AgentSession {
       if (!this.connection || !this.sessionId) {
         throw new Error("Agent session is not ready.");
       }
+      const prompt: acp.ContentBlock[] = [{ type: "text", text }];
+      if (images && images.length > 0) {
+        if (!this.supportsImages())
+          throw new Error("The configured agent does not support image prompts.");
+        for (const img of images) {
+          prompt.push({ type: "image", data: img.data, mimeType: img.mimeType });
+        }
+      }
       const result = await this.connection.prompt({
         sessionId: this.sessionId,
-        prompt: [{ type: "text", text }],
+        prompt,
       });
       this.emit({ type: "turn-end", stopReason: result?.stopReason });
       return result;
