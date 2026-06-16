@@ -4,5 +4,5 @@ node_modules/
 # TypeScript build info
 *.tsbuildinfo
 
-# Keep the built bundle (lib/main.js) committed so `ppm link` / install works
+# Keep the built bundle (lib/) committed so `ppm link` / install works
 # without a build step. Do NOT ignore lib/.

@@ -78,8 +78,15 @@ Pulsar loads `lib/main.js`. Rebuild after editing `src/`, then reload Pulsar.
 - `src/main.ts` registers commands, opener, and dock item.
 - `src/agent-view.ts` renders the panel UI.
 - `src/agent-session.ts` manages the ACP session via `@agentclientprotocol/sdk`.
+- `src/util.ts` holds pure helpers (`parseCommandLine`, `TerminalRecord`) split
+  out so they can be unit-tested without loading `atom`.
 
 The SDK is ESM-only, so esbuild bundles it and `zod` into `lib/main.js`.
+
+## Testing
+
+`npm test` runs Node's built-in runner over `test/*.test.mjs`. Run
+`npm run build` first because tests import the built `lib/util.js`.
 
 ## Capabilities
 
