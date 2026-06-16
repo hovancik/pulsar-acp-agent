@@ -47,9 +47,10 @@ terminal whose output is shown in the panel.
 | `authenticate` | 🟡 | Auto-runs the **first** auth method the agent advertises; no method picker. Surfaces a login hint on failure. |
 | `logout` | ⬜ | `agentCapabilities.auth.logout`. Would let users switch accounts without restarting. |
 | `session/new` | ✅ | Created with the working directory; no MCP servers passed. |
-| `session/load` | ⬜ | Requires the `loadSession` capability. Restores a prior conversation. The dock deserializer is already wired (`deserializePulsarAcpAgentView`), so this is the natural next step. |
-| `session/list` | ⬜ | Enumerate past sessions — the basis for a "reopen previous agent sessions" picker. |
-| `session/resume` / `session/delete` / `session/close` | ⬜ | Newer stabilized lifecycle methods for managing session history. |
+| `session/load` | ✅ | Switches to a prior session; conversation history is streamed back by the agent and cached client-side so switching back does not re-request history. Gated on `agentCapabilities.loadSession`. |
+| `session/list` | ✅ | Fetches past sessions and shows them in a scrollable sessions bar (up to 10 visible). Gated on `sessionCapabilities.list`. |
+| `session/delete` | ✅ | Delete button per session entry (hover to reveal). Gated on `sessionCapabilities.delete`. |
+| `session/resume` / `session/close` | ⬜ | Not yet implemented. |
 | `session/cancel` | ✅ | Stop button; also drains pending permission prompts. |
 | Stop reasons (`end_turn`, …) | ✅ | Surfaced on turn end. |
 
@@ -97,11 +98,11 @@ terminal whose output is shown in the panel.
 
 ## Suggested priorities
 
-1. **Session load + list** — restore and reopen past conversations; the deserializer groundwork is already in place.
-2. **Slash commands** (`available_commands_update`) — cheap, high-value UX; surfaces agent-native commands.
-3. **Session modes / model selection** — let users drive the agent's built-in options instead of only seeing them.
-4. **Rich prompt content** — attach the current file/selection or images.
-5. **Logout** — account switching without a restart.
+1. **Slash commands** (`available_commands_update`) — cheap, high-value UX; surfaces agent-native commands.
+2. **Session modes / model selection** — let users drive the agent's built-in options instead of only seeing them.
+3. **Rich prompt content** — attach the current file/selection or images.
+4. **Logout** — account switching without a restart.
+5. **Session close** — free agent-side resources when leaving a session.
 
 ## How Zed does it
 

@@ -253,3 +253,118 @@
   margin-top: (@component-padding / 2);
   border-radius: @component-border-radius;
 }
+
+.pulsar-acp-agent-sessions-bar {
+  border-bottom: 1px solid @pane-item-border-color;
+  font-size: 0.9em;
+}
+
+.pulsar-acp-agent-sessions-controls {
+  display: flex;
+  align-items: center;
+  padding: (@component-padding / 4) (@component-padding / 2);
+  gap: (@component-padding / 2);
+
+  .pulsar-acp-agent-sessions-toggle {
+    flex: 1;
+    text-align: left;
+    background: none;
+    border: none;
+    color: @text-color-subtle;
+    padding: 2px 4px;
+    cursor: pointer;
+
+    &:hover {
+      color: @text-color;
+    }
+  }
+
+  .pulsar-acp-agent-new-session {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    font-size: 0.85em;
+  }
+}
+
+.pulsar-acp-agent-sessions-list {
+  max-height: calc(10 * 2em + @component-padding);
+  overflow-y: auto;
+  padding: (@component-padding / 4) 0;
+  border-top: 1px solid @pane-item-border-color;
+}
+
+.pulsar-acp-agent-session-row {
+  display: flex;
+  align-items: center;
+
+  &:hover .pulsar-acp-agent-session-delete {
+    opacity: 1;
+  }
+}
+
+.pulsar-acp-agent-session-delete {
+  flex-shrink: 0;
+  opacity: 0;
+  background: none;
+  border: none;
+  color: @text-color-subtle;
+  padding: 0 (@component-padding / 2);
+  cursor: pointer;
+  font-size: 1em;
+  line-height: 1;
+
+  &:hover:not(:disabled) {
+    color: @text-color-error;
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.pulsar-acp-agent-session-entry {
+  display: flex;
+  align-items: baseline;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 3px @component-padding;
+  gap: (@component-padding / 2);
+  color: @text-color;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background-color: @background-color-highlight;
+  }
+
+  &.is-active {
+    color: @text-color-highlight;
+    font-weight: bold;
+
+    &::before {
+      content: "\2022";
+      margin-right: 4px;
+      color: @text-color-success;
+    }
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .pulsar-acp-agent-session-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pulsar-acp-agent-session-time {
+    flex-shrink: 0;
+    color: @text-color-subtle;
+    font-size: 0.85em;
+  }
+}

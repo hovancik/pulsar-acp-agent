@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added ACP `terminal/*` capability.
 - Added image attachment support for PNG, JPEG, GIF, and WebP files up to 5 MiB.
+- Added session list in the sessions bar: browse and switch between past sessions.
+- Added delete button per session entry (shown when the agent advertises `sessionCapabilities.delete`).
 
 ### Fixed
 

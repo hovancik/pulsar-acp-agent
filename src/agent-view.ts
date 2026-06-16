@@ -55,6 +55,12 @@ export class PulsarAcpAgentView {
   private sendButton!: HTMLButtonElement;
   private stopButton!: HTMLButtonElement;
   private restartButton!: HTMLButtonElement;
+  private newSessionButton!: HTMLButtonElement;
+  private sessionsBar!: HTMLElement;
+  private sessionsList!: HTMLElement;
+  private sessionsListVisible = false;
+  private knownSessions: acp.SessionInfo[] = [];
+  private sessionConversationCache = new Map<string, HTMLElement>();
 
   private pendingImages: PendingImage[] = [];
   private pendingImageLoads = 0;
@@ -74,6 +80,11 @@ export class PulsarAcpAgentView {
     );
     this.subscriptions.add(this.eventSubscription);
     this.setStatus("Idle \u2014 type a message to start the agent.");
+
+    // Start the agent eagerly so the session list is available immediately.
+    this.session.start().catch(() => {
+      // Errors are surfaced via the event stream; suppress the unhandled rejection.
+    });
   }
 
   private buildUI(): void {
@@ -190,8 +201,43 @@ export class PulsarAcpAgentView {
     footer.appendChild(actions);
 
     this.element.appendChild(header);
+    this.element.appendChild(this.buildSessionsBar());
     this.element.appendChild(this.conversation);
     this.element.appendChild(footer);
+  }
+
+  private buildSessionsBar(): HTMLElement {
+    this.sessionsBar = document.createElement("div");
+    this.sessionsBar.classList.add("pulsar-acp-agent-sessions-bar");
+    this.sessionsBar.style.display = "none";
+
+    const controls = document.createElement("div");
+    controls.classList.add("pulsar-acp-agent-sessions-controls");
+
+    const toggle = document.createElement("button");
+    toggle.classList.add("pulsar-acp-agent-sessions-toggle", "btn");
+    toggle.textContent = "\u25b8 Sessions";
+    toggle.addEventListener("click", () => {
+      this.sessionsListVisible = !this.sessionsListVisible;
+      this.sessionsList.style.display = this.sessionsListVisible ? "" : "none";
+      toggle.textContent = `${this.sessionsListVisible ? "\u25be" : "\u25b8"} Sessions`;
+    });
+
+    this.newSessionButton = this.makeButton("+ New", () =>
+      this.startNewSession(),
+    );
+    this.newSessionButton.classList.add("pulsar-acp-agent-new-session");
+
+    controls.appendChild(toggle);
+    controls.appendChild(this.newSessionButton);
+
+    this.sessionsList = document.createElement("div");
+    this.sessionsList.classList.add("pulsar-acp-agent-sessions-list");
+    this.sessionsList.style.display = "none";
+
+    this.sessionsBar.appendChild(controls);
+    this.sessionsBar.appendChild(this.sessionsList);
+    return this.sessionsBar;
   }
 
   private makeButton(label: string, onClick: () => void): HTMLButtonElement {
@@ -211,6 +257,7 @@ export class PulsarAcpAgentView {
     if (
       (text.length === 0 && this.pendingImages.length === 0) ||
       this.session.running ||
+      this.session.switching ||
       this.preparingPrompt ||
       this.pendingImageLoads > 0
     )
@@ -268,7 +315,27 @@ export class PulsarAcpAgentView {
       this.handleEvent(event),
     );
     this.subscriptions.add(this.eventSubscription);
+    this.clearConversation();
+    this.imageSupportKnown = false;
+    this.supportsImages = false;
+    this.attachButton.style.display = "";
+    this.sessionsBar.style.display = "none";
+    this.sessionsList.innerHTML = "";
+    this.knownSessions = [];
+    this.sessionsListVisible = false;
+    this.sessionConversationCache.clear();
+    this.sessionsList.style.display = "none";
+    this.setStatus("Idle \u2014 type a message to start the agent.");
+    this.stopButton.disabled = true;
+    this.updateInputControls();
+  }
+
+  private clearConversation(): void {
     this.conversation.innerHTML = "";
+    this.resetConversationState();
+  }
+
+  private resetConversationState(): void {
     this.toolViews.clear();
     this.terminalOutputs.clear();
     this.planElement = null;
@@ -277,14 +344,61 @@ export class PulsarAcpAgentView {
     this.pendingImageLoads = 0;
     this.imageLoadGeneration++;
     this.preparingPrompt = false;
-    this.imageSupportKnown = false;
-    this.supportsImages = false;
-    this.attachButton.style.display = "";
     this.clearThumbnails();
     this.endStreamingBlocks();
-    this.setStatus("Idle \u2014 type a message to start the agent.");
-    this.stopButton.disabled = true;
-    this.updateInputControls();
+  }
+
+  private startNewSession(): void {
+    if (this.session.running || this.session.switching) return;
+    this.session.newSession().catch((error) => {
+      this.appendError(error instanceof Error ? error.message : String(error));
+      this.updateInputControls();
+      this.updateSessionControls();
+    });
+  }
+
+  private switchToSession(id: string): void {
+    if (this.session.running || this.session.switching) return;
+    const currentId = this.session.sessionId;
+    const info = this.knownSessions.find((s) => s.sessionId === id);
+
+    // Save current conversation DOM node (preserves canvas pixels etc.)
+    if (currentId) {
+      this.sessionConversationCache.set(currentId, this.conversation);
+      this.swapInFreshConversation();
+    }
+
+    const cached = this.sessionConversationCache.get(id);
+    if (cached !== undefined) {
+      this.resetConversationState();
+      this.swapInConversation(cached);
+      this.session.activateCachedSession(id);
+      return;
+    }
+
+    this.resetConversationState();
+    this.session.loadSession(id, info?.cwd).catch((error) => {
+      // Roll back to the previous session's conversation on failure.
+      if (currentId) {
+        const prev = this.sessionConversationCache.get(currentId);
+        if (prev) this.swapInConversation(prev);
+      }
+      this.appendError(error instanceof Error ? error.message : String(error));
+      this.updateInputControls();
+      this.updateSessionControls();
+    });
+  }
+
+  private swapInFreshConversation(): void {
+    const fresh = document.createElement("div");
+    fresh.className = this.conversation.className;
+    this.conversation.replaceWith(fresh);
+    this.conversation = fresh;
+  }
+
+  private swapInConversation(el: HTMLElement): void {
+    this.conversation.replaceWith(el);
+    this.conversation = el;
   }
 
   private handleEvent(event: AgentEvent): void {
@@ -300,21 +414,38 @@ export class PulsarAcpAgentView {
         this.attachButton.style.display = event.supportsImages ? "" : "none";
         this.updateInputControls();
         break;
+      case "ready":
+        if (event.source === "new") {
+          this.clearConversation();
+        }
+        if (event.source === "load") {
+          this.conversation.scrollTop = this.conversation.scrollHeight;
+        }
+        this.sessionsBar.style.display = "";
+        this.updateSessionControls();
+        this.updateInputControls();
+        break;
+      case "session-list":
+        this.renderSessionsList(event.sessions);
+        break;
       case "turn-start":
         this.stopButton.disabled = false;
         this.updateInputControls();
+        this.updateSessionControls();
         this.stderrBody = null;
         break;
       case "turn-end":
         this.stopButton.disabled = true;
         this.updateInputControls();
+        this.updateSessionControls();
         this.endStreamingBlocks();
         if (event.stopReason && event.stopReason !== "end_turn") {
           this.appendNote(`Turn stopped: ${event.stopReason}`);
         }
+        this.session.refreshSessionList();
         break;
       case "update":
-        this.handleUpdate(event.update);
+        this.handleUpdate(event.sessionId, event.update);
         break;
       case "permission":
         this.renderPermission(event.params, event.respond);
@@ -345,7 +476,10 @@ export class PulsarAcpAgentView {
     }
   }
 
-  private handleUpdate(update: acp.SessionUpdate): void {
+  private handleUpdate(
+    sessionId: acp.SessionId,
+    update: acp.SessionUpdate,
+  ): void {
     switch (update.sessionUpdate) {
       case "agent_message_chunk":
         this.appendChunk("agent", update.messageId, update.content);
@@ -373,6 +507,9 @@ export class PulsarAcpAgentView {
         ) {
           this.setStatus(`Context: ${update.used} / ${update.size} tokens`);
         }
+        break;
+      case "session_info_update":
+        this.applySessionInfoUpdate(sessionId, update);
         break;
     }
   }
@@ -575,6 +712,7 @@ export class PulsarAcpAgentView {
   private canAcceptImages(): boolean {
     return (
       !this.session.running &&
+      !this.session.switching &&
       !this.preparingPrompt &&
       (!this.imageSupportKnown || this.supportsImages)
     );
@@ -585,7 +723,10 @@ export class PulsarAcpAgentView {
   }
 
   private updateInputControls(): void {
-    const busy = this.session.running || this.preparingPrompt;
+    const busy =
+      this.session.running ||
+      this.session.switching ||
+      this.preparingPrompt;
     this.sendButton.disabled = busy || this.pendingImageLoads > 0;
     this.attachButton.disabled = busy || !this.canAcceptImages();
   }
@@ -824,6 +965,127 @@ export class PulsarAcpAgentView {
     block.appendChild(buttons);
     this.conversation.appendChild(block);
     this.scrollToBottom();
+  }
+
+  private renderSessionsList(sessions: acp.SessionInfo[]): void {
+    this.knownSessions = sessions;
+    this.sessionsList.innerHTML = "";
+    const canDelete = this.session.canDeleteSession();
+    for (const info of sessions) {
+      const row = document.createElement("div");
+      row.classList.add("pulsar-acp-agent-session-row");
+      row.dataset.sessionId = info.sessionId;
+
+      const entry = document.createElement("button");
+      entry.classList.add("pulsar-acp-agent-session-entry", "btn");
+      if (info.sessionId === this.session.sessionId) {
+        entry.classList.add("is-active");
+      }
+      entry.disabled =
+        this.session.running ||
+        this.session.switching ||
+        !this.session.canLoadSession() ||
+        info.sessionId === this.session.sessionId;
+
+      const titleEl = document.createElement("span");
+      titleEl.classList.add("pulsar-acp-agent-session-title");
+      titleEl.textContent = info.title || info.sessionId;
+      titleEl.title = info.title || info.sessionId;
+
+      const timeEl = document.createElement("span");
+      timeEl.classList.add("pulsar-acp-agent-session-time");
+      timeEl.textContent = info.updatedAt ? this.relativeTime(info.updatedAt) : "";
+
+      entry.appendChild(titleEl);
+      entry.appendChild(timeEl);
+      entry.addEventListener("click", () => {
+        if (info.sessionId !== this.session.sessionId)
+          this.switchToSession(info.sessionId);
+      });
+      row.appendChild(entry);
+
+      if (canDelete) {
+        const del = document.createElement("button");
+        del.classList.add("pulsar-acp-agent-session-delete", "btn");
+        del.title = "Delete session";
+        del.textContent = "\u00d7";
+        del.disabled = this.session.running || this.session.switching;
+        del.addEventListener("click", () => this.deleteSession(info.sessionId));
+        row.appendChild(del);
+      }
+
+      this.sessionsList.appendChild(row);
+    }
+  }
+
+  private deleteSession(id: string): void {
+    if (this.session.running || this.session.switching) return;
+    const info = this.knownSessions.find((s) => s.sessionId === id);
+    const result = this.session.deleteSession(id, info?.cwd);
+    this.updateInputControls();
+    this.updateSessionControls();
+    result.then(({ deletedActive }) => {
+      this.sessionConversationCache.delete(id);
+      if (deletedActive) {
+        this.clearConversation();
+        this.startNewSession();
+      } else {
+        this.updateInputControls();
+        this.updateSessionControls();
+      }
+    }).catch((error) => {
+      this.appendError(error instanceof Error ? error.message : String(error));
+      this.updateInputControls();
+      this.updateSessionControls();
+    });
+  }
+
+  private applySessionInfoUpdate(
+    sessionId: acp.SessionId,
+    update: acp.SessionInfoUpdate,
+  ): void {
+    const index = this.knownSessions.findIndex(
+      (session) => session.sessionId === sessionId,
+    );
+    if (index === -1) return;
+
+    const nextSessions = this.knownSessions.slice();
+    const nextInfo = { ...nextSessions[index] };
+    if (update.title !== undefined) nextInfo.title = update.title;
+    if (update.updatedAt !== undefined) nextInfo.updatedAt = update.updatedAt;
+    nextSessions[index] = nextInfo;
+    this.renderSessionsList(nextSessions);
+    this.updateSessionControls();
+  }
+
+  private updateSessionControls(): void {
+    const busy = this.session.running || this.session.switching;
+    this.newSessionButton.disabled = busy;
+    for (const row of Array.from(
+      this.sessionsList.querySelectorAll<HTMLElement>(".pulsar-acp-agent-session-row"),
+    )) {
+      const id = row.dataset.sessionId;
+      const entry = row.querySelector<HTMLButtonElement>(".pulsar-acp-agent-session-entry");
+      const del = row.querySelector<HTMLButtonElement>(".pulsar-acp-agent-session-delete");
+      if (entry) {
+        const canLoad = this.session.canLoadSession() && id !== this.session.sessionId;
+        entry.disabled = busy || !canLoad;
+      }
+      if (del) del.disabled = busy;
+    }
+  }
+
+  private relativeTime(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60_000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days === 1) return "yesterday";
+    if (days < 30) return `${days}d ago`;
+    return new Date(iso).toLocaleDateString();
   }
 
   private setStatus(text: string): void {
