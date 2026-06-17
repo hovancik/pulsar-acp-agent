@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Conversation now reliably auto-scrolls to follow streamed agent output unless you scroll up.
 - Input textarea now uses theme variables instead of browser defaults.
 
 ## [0.1.0] - 2026-06-15
