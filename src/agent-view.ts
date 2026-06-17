@@ -1,6 +1,10 @@
 import { CompositeDisposable } from "atom";
 import * as acp from "@agentclientprotocol/sdk";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 import { AgentEvent, AgentSession } from "./agent-session";
+
+marked.setOptions({ breaks: true });
 
 export const PULSAR_ACP_AGENT_URI = "atom://pulsar-acp-agent";
 
@@ -45,6 +49,7 @@ export class PulsarAcpAgentView {
   private streamRole: string | null = null;
   private streamMessageId: string | null = null;
   private streamBody: HTMLElement | null = null;
+  private streamRawText = "";
   private stickToBottom = true;
 
   private statusEl!: HTMLElement;
@@ -642,6 +647,7 @@ export class PulsarAcpAgentView {
           this.clearConversation();
         }
         if (event.source === "load") {
+          this.endStreamingBlocks();
           this.stickToBottom = true;
           this.conversation.scrollTop = this.conversation.scrollHeight;
         }
@@ -777,18 +783,35 @@ export class PulsarAcpAgentView {
       this.streamMessageId !== streamMessageId ||
       !this.streamBody
     ) {
+      this.endStreamingBlocks();
       this.streamBody = this.appendMessage(role, "");
       this.streamRole = role;
       this.streamMessageId = streamMessageId;
     }
+    this.streamRawText += text;
     this.streamBody.textContent += text;
     this.scrollToBottom();
   }
 
   private endStreamingBlocks(): void {
+    const markdownRoles = new Set(["agent", "thought", "user"]);
+    if (this.streamBody && this.streamRawText && markdownRoles.has(this.streamRole ?? "")) {
+      this.renderMarkdown(this.streamBody, this.streamRawText);
+      this.scrollToBottom();
+    }
     this.streamRole = null;
     this.streamMessageId = null;
     this.streamBody = null;
+    this.streamRawText = "";
+  }
+
+  // Renders Markdown into el. Agent and user content frequently relays
+  // untrusted data (file contents, tool/web output, prompt-injection payloads),
+  // so the generated HTML is sanitized with DOMPurify to strip scripts and
+  // inline event handlers.
+  private renderMarkdown(el: HTMLElement, text: string): void {
+    const html = marked.parse(text, { async: false });
+    el.innerHTML = DOMPurify.sanitize(html);
   }
 
   private appendMessage(role: string, text: string): HTMLElement {
@@ -824,6 +847,7 @@ export class PulsarAcpAgentView {
     images: PendingImage[],
   ): void {
     const body = this.appendMessage("user", text);
+    this.renderMarkdown(body, text);
     for (const img of images) {
       body.appendChild(
         this.createImageCanvas(img.file, "pulsar-acp-agent-inline-image"),
