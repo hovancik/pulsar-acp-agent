@@ -47,6 +47,16 @@ export class PulsarAcpAgentView {
   private streamBody: HTMLElement | null = null;
 
   private statusEl!: HTMLElement;
+  private liveStatusEl!: HTMLElement;
+  private agentNameEl!: HTMLElement;
+  private infoButton!: HTMLButtonElement;
+  private infoPanel!: HTMLElement;
+  private infoPanelOpen = false;
+  private storedAgentInfo: acp.Implementation | null = null;
+  private storedCapabilities: acp.AgentCapabilities | null = null;
+  private currentMode: string | null = null;
+  private currentTokens: string | null = null;
+  private lifecycleStatus = "";
   private input!: HTMLTextAreaElement;
   private fileInput!: HTMLInputElement;
   private attachButton!: HTMLButtonElement;
@@ -58,9 +68,14 @@ export class PulsarAcpAgentView {
   private newSessionButton!: HTMLButtonElement;
   private sessionsBar!: HTMLElement;
   private sessionsList!: HTMLElement;
+  private sessionsToggle!: HTMLButtonElement;
   private sessionsListVisible = false;
   private knownSessions: acp.SessionInfo[] = [];
   private sessionConversationCache = new Map<string, HTMLElement>();
+  private sessionLiveState = new Map<
+    string,
+    { mode: string | null; tokens: string | null }
+  >();
 
   private pendingImages: PendingImage[] = [];
   private pendingImageLoads = 0;
@@ -69,6 +84,7 @@ export class PulsarAcpAgentView {
   private preparingPrompt = false;
   private imageSupportKnown = false;
   private supportsImages = false;
+  private startObserver: IntersectionObserver | null = null;
 
   constructor() {
     this.subscriptions = new CompositeDisposable();
@@ -79,9 +95,35 @@ export class PulsarAcpAgentView {
       this.handleEvent(event),
     );
     this.subscriptions.add(this.eventSubscription);
-    this.setStatus("Idle \u2014 type a message to start the agent.");
+    this.setLifecycleStatus("Idle \u2014 type a message to start the agent.");
 
-    // Start the agent eagerly so the session list is available immediately.
+    // Start the agent only once the panel is actually shown. A dock restored
+    // collapsed at editor startup should not spawn the agent until the user
+    // opens it. ensureStarted() also runs on the first prompt as a fallback.
+    this.observeStartOnVisible();
+  }
+
+  private observeStartOnVisible(): void {
+    if (typeof IntersectionObserver === "undefined") {
+      this.ensureStarted();
+      return;
+    }
+    this.startObserver = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        this.disconnectStartObserver();
+        this.ensureStarted();
+      }
+    });
+    this.startObserver.observe(this.element);
+  }
+
+  private disconnectStartObserver(): void {
+    this.startObserver?.disconnect();
+    this.startObserver = null;
+  }
+
+  private ensureStarted(): void {
+    this.disconnectStartObserver();
     this.session.start().catch(() => {
       // Errors are surfaced via the event stream; suppress the unhandled rejection.
     });
@@ -93,16 +135,44 @@ export class PulsarAcpAgentView {
 
     const header = document.createElement("div");
     header.classList.add("pulsar-acp-agent-header");
+
+    const row1 = document.createElement("div");
+    row1.classList.add("pulsar-acp-agent-header-row1");
     const title = document.createElement("span");
     title.classList.add("pulsar-acp-agent-title");
     title.textContent = "Pulsar ACP Agent";
+    this.agentNameEl = document.createElement("span");
+    this.agentNameEl.classList.add("pulsar-acp-agent-name");
+    this.agentNameEl.style.display = "none";
     this.statusEl = document.createElement("span");
-    this.statusEl.classList.add("pulsar-acp-agent-status");
+    this.statusEl.classList.add("pulsar-acp-agent-status-spacer");
+    this.infoButton = document.createElement("button");
+    this.infoButton.classList.add(
+      "btn",
+      "icon",
+      "icon-info",
+      "pulsar-acp-agent-info-btn",
+    );
+    this.infoButton.title = "Agent info";
+    this.infoButton.style.display = "none";
+    this.infoButton.addEventListener("click", () => this.toggleInfoPanel());
     this.restartButton = this.makeButton("Restart", () => this.restart());
     this.restartButton.classList.add("pulsar-acp-agent-restart");
-    header.appendChild(title);
-    header.appendChild(this.statusEl);
-    header.appendChild(this.restartButton);
+    row1.appendChild(title);
+    row1.appendChild(this.agentNameEl);
+    row1.appendChild(this.statusEl);
+    row1.appendChild(this.infoButton);
+    row1.appendChild(this.restartButton);
+
+    this.liveStatusEl = document.createElement("div");
+    this.liveStatusEl.classList.add("pulsar-acp-agent-header-row2");
+
+    header.appendChild(row1);
+    header.appendChild(this.liveStatusEl);
+
+    this.infoPanel = document.createElement("div");
+    this.infoPanel.classList.add("pulsar-acp-agent-info-panel");
+    this.infoPanel.style.display = "none";
 
     this.conversation = document.createElement("div");
     this.conversation.classList.add("pulsar-acp-agent-conversation");
@@ -201,6 +271,7 @@ export class PulsarAcpAgentView {
     footer.appendChild(actions);
 
     this.element.appendChild(header);
+    this.element.appendChild(this.infoPanel);
     this.element.appendChild(this.buildSessionsBar());
     this.element.appendChild(this.conversation);
     this.element.appendChild(footer);
@@ -214,13 +285,13 @@ export class PulsarAcpAgentView {
     const controls = document.createElement("div");
     controls.classList.add("pulsar-acp-agent-sessions-controls");
 
-    const toggle = document.createElement("button");
-    toggle.classList.add("pulsar-acp-agent-sessions-toggle", "btn");
-    toggle.textContent = "\u25b8 Sessions";
-    toggle.addEventListener("click", () => {
+    this.sessionsToggle = document.createElement("button");
+    this.sessionsToggle.classList.add("pulsar-acp-agent-sessions-toggle", "btn");
+    this.sessionsToggle.textContent = "\u25b8 Sessions";
+    this.sessionsToggle.addEventListener("click", () => {
       this.sessionsListVisible = !this.sessionsListVisible;
       this.sessionsList.style.display = this.sessionsListVisible ? "" : "none";
-      toggle.textContent = `${this.sessionsListVisible ? "\u25be" : "\u25b8"} Sessions`;
+      this.sessionsToggle.textContent = `${this.sessionsListVisible ? "\u25be" : "\u25b8"} Sessions`;
     });
 
     this.newSessionButton = this.makeButton("+ New", () =>
@@ -228,7 +299,7 @@ export class PulsarAcpAgentView {
     );
     this.newSessionButton.classList.add("pulsar-acp-agent-new-session");
 
-    controls.appendChild(toggle);
+    controls.appendChild(this.sessionsToggle);
     controls.appendChild(this.newSessionButton);
 
     this.sessionsList = document.createElement("div");
@@ -246,6 +317,93 @@ export class PulsarAcpAgentView {
     button.textContent = label;
     button.addEventListener("click", onClick);
     return button;
+  }
+
+  private toggleInfoPanel(): void {
+    this.infoPanelOpen = !this.infoPanelOpen;
+    if (this.infoPanelOpen) {
+      this.renderInfoPanel();
+      this.infoPanel.style.display = "";
+    } else {
+      this.infoPanel.style.display = "none";
+    }
+    this.infoButton.classList.toggle(
+      "pulsar-acp-agent-info-btn--active",
+      this.infoPanelOpen,
+    );
+  }
+
+  private renderInfoPanel(): void {
+    this.infoPanel.innerHTML = "";
+    const info = this.storedAgentInfo;
+    const caps = this.storedCapabilities;
+    if (!info) return;
+
+    const addRow = (label: string, content: HTMLElement | string): void => {
+      const row = document.createElement("div");
+      row.classList.add("pulsar-acp-agent-info-row");
+      const lbl = document.createElement("span");
+      lbl.classList.add("pulsar-acp-agent-info-label");
+      lbl.textContent = label;
+      row.appendChild(lbl);
+      if (typeof content === "string") {
+        const val = document.createElement("span");
+        val.classList.add("pulsar-acp-agent-info-value");
+        val.textContent = content;
+        row.appendChild(val);
+      } else {
+        row.appendChild(content);
+      }
+      this.infoPanel.appendChild(row);
+    };
+
+    addRow("Version", info.version);
+
+    const capsEl = document.createElement("span");
+    capsEl.classList.add("pulsar-acp-agent-info-caps");
+    const pills = this.buildCapabilityPills(caps);
+    if (pills.length === 0) {
+      const none = document.createElement("span");
+      none.classList.add("pulsar-acp-agent-info-value");
+      none.textContent = "none reported";
+      capsEl.appendChild(none);
+    } else {
+      pills.forEach((p) => capsEl.appendChild(p));
+    }
+    addRow("Capabilities", capsEl);
+
+    const meta = info._meta;
+    if (meta && Object.keys(meta).length > 0) {
+      const pre = document.createElement("pre");
+      pre.classList.add("pulsar-acp-agent-info-meta");
+      pre.textContent = JSON.stringify(meta, null, 2);
+      addRow("Meta", pre);
+    }
+  }
+
+  private buildCapabilityPills(
+    caps: acp.AgentCapabilities | null,
+  ): HTMLElement[] {
+    const pills: HTMLElement[] = [];
+    const pill = (label: string): HTMLElement => {
+      const el = document.createElement("span");
+      el.classList.add("pulsar-acp-agent-cap-pill");
+      el.textContent = label;
+      return el;
+    };
+    if (!caps) return pills;
+    if (caps.loadSession) pills.push(pill("load-session"));
+    if (caps.promptCapabilities?.image) pills.push(pill("image"));
+    if (caps.promptCapabilities?.audio) pills.push(pill("audio"));
+    if (caps.promptCapabilities?.embeddedContext)
+      pills.push(pill("embedded-context"));
+    if (caps.mcpCapabilities?.http) pills.push(pill("mcp-http"));
+    if (caps.mcpCapabilities?.sse) pills.push(pill("mcp-sse"));
+    if (caps.sessionCapabilities?.delete) pills.push(pill("session-delete"));
+    if (caps.sessionCapabilities?.additionalDirectories)
+      pills.push(pill("additional-dirs"));
+    if (caps.auth?.logout) pills.push(pill("logout"));
+    return pills;
   }
 
   private send(): void {
@@ -319,15 +477,41 @@ export class PulsarAcpAgentView {
     this.imageSupportKnown = false;
     this.supportsImages = false;
     this.attachButton.style.display = "";
+    this.resetAgentChrome();
+    this.resetSessionsChrome();
+    this.setLifecycleStatus("Idle \u2014 type a message to start the agent.");
+    this.renderLiveRow();
+    this.stopButton.disabled = true;
+    this.updateInputControls();
+
+    // Restart is user-initiated on a visible panel, so reconnect immediately
+    // rather than waiting for the panel to be shown again.
+    this.ensureStarted();
+  }
+
+  private resetSessionsChrome(): void {
     this.sessionsBar.style.display = "none";
     this.sessionsList.innerHTML = "";
+    this.sessionsList.style.display = "none";
+    this.sessionsToggle.textContent = "\u25b8 Sessions";
     this.knownSessions = [];
     this.sessionsListVisible = false;
     this.sessionConversationCache.clear();
-    this.sessionsList.style.display = "none";
-    this.setStatus("Idle \u2014 type a message to start the agent.");
-    this.stopButton.disabled = true;
-    this.updateInputControls();
+    this.sessionLiveState.clear();
+  }
+
+  private resetAgentChrome(): void {
+    this.storedAgentInfo = null;
+    this.storedCapabilities = null;
+    this.currentMode = null;
+    this.currentTokens = null;
+    this.renderLiveRow();
+    this.agentNameEl.textContent = "";
+    this.agentNameEl.style.display = "none";
+    this.infoButton.style.display = "none";
+    this.infoPanel.style.display = "none";
+    this.infoPanel.innerHTML = "";
+    this.infoPanelOpen = false;
   }
 
   private clearConversation(): void {
@@ -350,7 +534,19 @@ export class PulsarAcpAgentView {
 
   private startNewSession(): void {
     if (this.session.running || this.session.switching) return;
+    // Cache the outgoing conversation: the agent keeps it loaded, so returning
+    // to it must restore this DOM rather than re-load (which the agent rejects).
+    const currentId = this.session.sessionId;
+    if (currentId) {
+      this.sessionConversationCache.set(currentId, this.conversation);
+      this.swapInFreshConversation();
+    }
     this.session.newSession().catch((error) => {
+      // Roll back to the previous conversation if creating the session failed.
+      if (currentId) {
+        const prev = this.sessionConversationCache.get(currentId);
+        if (prev) this.swapInConversation(prev);
+      }
       this.appendError(error instanceof Error ? error.message : String(error));
       this.updateInputControls();
       this.updateSessionControls();
@@ -368,21 +564,31 @@ export class PulsarAcpAgentView {
       this.swapInFreshConversation();
     }
 
-    const cached = this.sessionConversationCache.get(id);
-    if (cached !== undefined) {
+    // If the agent already has this session loaded, re-activate it instead of
+    // calling session/load again (agents reject loading an already-loaded
+    // session). Restore the cached conversation DOM when we still have it.
+    if (this.session.isSessionLoaded(id)) {
       this.resetConversationState();
-      this.swapInConversation(cached);
+      const cached = this.sessionConversationCache.get(id);
+      if (cached !== undefined) this.swapInConversation(cached);
       this.session.activateCachedSession(id);
       return;
     }
 
     this.resetConversationState();
+    // Show progress: session/load replays history asynchronously, leaving the
+    // conversation blank until the "ready" event clears this status.
+    this.currentMode = null;
+    this.currentTokens = null;
+    this.setLifecycleStatus("Loading session\u2026");
+    this.updateSessionControls();
     this.session.loadSession(id, info?.cwd).catch((error) => {
       // Roll back to the previous session's conversation on failure.
       if (currentId) {
         const prev = this.sessionConversationCache.get(currentId);
         if (prev) this.swapInConversation(prev);
       }
+      this.setLifecycleStatus("");
       this.appendError(error instanceof Error ? error.message : String(error));
       this.updateInputControls();
       this.updateSessionControls();
@@ -404,17 +610,27 @@ export class PulsarAcpAgentView {
   private handleEvent(event: AgentEvent): void {
     switch (event.type) {
       case "status":
-        this.setStatus(event.text);
+        this.setLifecycleStatus(event.text);
         break;
       case "initialized":
-        if (event.info && event.info.name)
-          this.setStatus(`Connected to ${event.info.title || event.info.name}`);
+        this.storedAgentInfo = event.info;
+        this.storedCapabilities = event.capabilities;
+        if (event.info) {
+          const displayName = event.info.title || event.info.name;
+          this.agentNameEl.textContent = `\u00b7 ${displayName}`;
+          this.agentNameEl.style.display = "";
+          this.infoButton.style.display = "";
+          if (this.infoPanelOpen) this.renderInfoPanel();
+        }
+        this.setLifecycleStatus("Connected");
         this.imageSupportKnown = true;
         this.supportsImages = event.supportsImages;
         this.attachButton.style.display = event.supportsImages ? "" : "none";
         this.updateInputControls();
         break;
       case "ready":
+        this.lifecycleStatus = "";
+        this.restoreLiveStateFor(this.session.sessionId);
         if (event.source === "new") {
           this.clearConversation();
         }
@@ -466,9 +682,11 @@ export class PulsarAcpAgentView {
         this.updateInputControls();
         break;
       case "exit":
-        this.setStatus(
+        this.setLifecycleStatus(
           `Agent exited${event.code != null ? ` (code ${event.code})` : ""}. Press Restart.`,
         );
+        this.resetAgentChrome();
+        this.resetSessionsChrome();
         this.stopButton.disabled = true;
         this.updateInputControls();
         this.endStreamingBlocks();
@@ -498,14 +716,18 @@ export class PulsarAcpAgentView {
         this.renderPlan(update.entries || []);
         break;
       case "current_mode_update":
-        this.setStatus(`Mode: ${update.currentModeId}`);
+        this.currentMode = update.currentModeId || null;
+        this.rememberLiveState(sessionId, "mode", this.currentMode);
+        this.renderLiveRow();
         break;
       case "usage_update":
         if (
           typeof update.used === "number" &&
           typeof update.size === "number"
         ) {
-          this.setStatus(`Context: ${update.used} / ${update.size} tokens`);
+          this.currentTokens = `${update.used}\u202f/\u202f${update.size} tokens`;
+          this.rememberLiveState(sessionId, "tokens", this.currentTokens);
+          this.renderLiveRow();
         }
         break;
       case "session_info_update":
@@ -1021,11 +1243,29 @@ export class PulsarAcpAgentView {
   private deleteSession(id: string): void {
     if (this.session.running || this.session.switching) return;
     const info = this.knownSessions.find((s) => s.sessionId === id);
-    const result = this.session.deleteSession(id, info?.cwd);
+    const label = info?.title || id;
+    atom.confirm(
+      {
+        type: "warning",
+        message: "Delete this session?",
+        detail: `"${label}" will be permanently removed. This cannot be undone.`,
+        buttons: ["Delete", "Cancel"],
+        defaultId: 1,
+      },
+      (response) => {
+        if (response === 0) this.performDeleteSession(id, info?.cwd);
+      },
+    );
+  }
+
+  private performDeleteSession(id: string, cwd?: string): void {
+    if (this.session.running || this.session.switching) return;
+    const result = this.session.deleteSession(id, cwd);
     this.updateInputControls();
     this.updateSessionControls();
     result.then(({ deletedActive }) => {
       this.sessionConversationCache.delete(id);
+      this.sessionLiveState.delete(id);
       if (deletedActive) {
         this.clearConversation();
         this.startNewSession();
@@ -1088,8 +1328,39 @@ export class PulsarAcpAgentView {
     return new Date(iso).toLocaleDateString();
   }
 
-  private setStatus(text: string): void {
-    this.statusEl.textContent = text;
+  private setLifecycleStatus(text: string): void {
+    this.lifecycleStatus = text;
+    this.renderLiveRow();
+  }
+
+  private renderLiveRow(): void {
+    const parts = [this.currentMode, this.currentTokens].filter(
+      (p): p is string => p != null && p.length > 0,
+    );
+    this.liveStatusEl.textContent =
+      parts.length > 0 ? parts.join(" \u00b7 ") : this.lifecycleStatus;
+  }
+
+  // Mode and token usage are per-session; remember them so switching back to a
+  // session restores its live row instead of showing a blank one.
+  private rememberLiveState(
+    sessionId: string,
+    key: "mode" | "tokens",
+    value: string | null,
+  ): void {
+    const state = this.sessionLiveState.get(sessionId) ?? {
+      mode: null,
+      tokens: null,
+    };
+    state[key] = value;
+    this.sessionLiveState.set(sessionId, state);
+  }
+
+  private restoreLiveStateFor(sessionId: string | null): void {
+    const state = sessionId ? this.sessionLiveState.get(sessionId) : undefined;
+    this.currentMode = state?.mode ?? null;
+    this.currentTokens = state?.tokens ?? null;
+    this.renderLiveRow();
   }
 
   private scrollToBottom(): void {
@@ -1134,6 +1405,7 @@ export class PulsarAcpAgentView {
   }
 
   destroy(): void {
+    this.disconnectStartObserver();
     this.subscriptions.dispose();
     this.session.dispose();
     if (this.element) this.element.remove();

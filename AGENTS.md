@@ -38,3 +38,6 @@ Guidance for AI agents and contributors working on this package.
 - Edit `src/`, then rebuild: `npm run build` (or `npm run watch`).
 - Keep the build green: `npm run typecheck` must pass.
 - The committed bundle `lib/main.js` must match the build (CI enforces this).
+- **Never commit unless explicitly asked.** Make code changes, run checks, and
+  report back — but do not run `git commit` (or `git push`) without an explicit
+  instruction from the developer.
