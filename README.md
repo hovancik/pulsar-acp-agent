@@ -57,6 +57,10 @@ Wrap a path that contains spaces in double quotes, e.g.
 If the agent advertises image prompt support, attach PNG, JPEG, GIF, or WebP
 images up to 5 MiB via the attachment button, drag-and-drop, or paste.
 
+Once connected, the header shows the agent's name. Click the info button next to
+it to reveal the agent's version, advertised capabilities, and any metadata it
+reports.
+
 If the agent advertises `session/list` support, a **Sessions** bar appears at
 the top of the panel. Click it to expand the list of past sessions and switch
 between them. If the agent also advertises `session/delete`, a `×` button

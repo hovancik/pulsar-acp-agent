@@ -10,24 +10,118 @@
 }
 
 .pulsar-acp-agent-header {
+  border-bottom: 1px solid @pane-item-border-color;
+}
+
+.pulsar-acp-agent-header-row1 {
   display: flex;
   align-items: center;
   padding: (@component-padding / 2) @component-padding;
-  border-bottom: 1px solid @pane-item-border-color;
+  padding-bottom: (@component-padding / 4);
 
   .pulsar-acp-agent-title {
     font-weight: bold;
+    flex-shrink: 0;
   }
 
-  .pulsar-acp-agent-status {
-    flex: 1;
-    margin: 0 @component-padding;
+  .pulsar-acp-agent-name {
+    flex-shrink: 0;
+    margin-left: 4px;
     color: @text-color-subtle;
-    font-size: 0.85em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-weight: normal;
   }
+
+  .pulsar-acp-agent-status-spacer {
+    flex: 1;
+  }
+
+  .pulsar-acp-agent-info-btn {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    padding: 0 4px;
+    color: @text-color-subtle;
+    cursor: pointer;
+    line-height: 1;
+    font-size: 1em;
+    margin-right: 4px;
+
+    &:hover {
+      color: @text-color;
+    }
+
+    &.pulsar-acp-agent-info-btn--active {
+      color: @text-color-info;
+    }
+  }
+}
+
+.pulsar-acp-agent-header-row2 {
+  padding: 0 @component-padding (@component-padding / 2);
+  color: @text-color-subtle;
+  font-size: 0.82em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: 1.2em;
+}
+
+.pulsar-acp-agent-info-panel {
+  border-bottom: 1px solid @pane-item-border-color;
+  padding: (@component-padding / 2) @component-padding;
+  background-color: @tool-panel-background-color;
+  font-size: 0.85em;
+}
+
+.pulsar-acp-agent-info-row {
+  display: flex;
+  align-items: baseline;
+  gap: @component-padding;
+  margin-bottom: (@component-padding / 4);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.pulsar-acp-agent-info-label {
+  flex-shrink: 0;
+  width: 6em;
+  color: @text-color-subtle;
+  font-size: 0.9em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pulsar-acp-agent-info-value {
+  color: @text-color;
+}
+
+.pulsar-acp-agent-info-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pulsar-acp-agent-cap-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background-color: @background-color-highlight;
+  color: @text-color;
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.pulsar-acp-agent-info-meta {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: monospace;
+  font-size: 0.9em;
+  color: @text-color-subtle;
+  max-height: 8em;
+  overflow-y: auto;
 }
 
 .pulsar-acp-agent-conversation {

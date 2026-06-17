@@ -10,7 +10,7 @@ import { parseCommandLine, TerminalRecord } from "./util";
 
 declare const __PULSAR_ACP_AGENT_VERSION__: string;
 
-export const PROTOCOL_VERSION = acp.PROTOCOL_VERSION;
+const PROTOCOL_VERSION = acp.PROTOCOL_VERSION;
 const STARTUP_TIMEOUT_MS = 30_000;
 const DEFAULT_OUTPUT_BYTE_LIMIT = 64 * 1024;
 const MAX_OUTPUT_BYTE_LIMIT = 1024 * 1024;
@@ -25,10 +25,11 @@ export type AgentEvent =
   | {
       type: "initialized";
       info: acp.Implementation | null;
+      capabilities: acp.AgentCapabilities | null;
       authMethods: acp.AuthMethod[];
       supportsImages: boolean;
     }
-  | { type: "ready"; session: acp.NewSessionResponse; source: "start" | "new" | "load" }
+  | { type: "ready"; source: "start" | "new" | "load" }
   | { type: "session-list"; sessions: acp.SessionInfo[] }
   | { type: "turn-start" }
   | { type: "turn-end"; stopReason?: acp.StopReason }
@@ -45,16 +46,6 @@ export type AgentEvent =
   | { type: "exit"; code: number | null; signal: string | null };
 
 type Listener = (event: AgentEvent) => void;
-
-interface ModelInfo {
-  modelId: string;
-  name: string;
-}
-
-interface SessionModelsExt {
-  availableModels?: ModelInfo[];
-  currentModelId?: string;
-}
 
 interface TerminalAuthMeta {
   command?: string;
@@ -94,6 +85,7 @@ export class AgentSession {
     (outcome: acp.RequestPermissionResponse) => void
   >();
   private terminals = new Map<string, TerminalRecord>();
+  private loadedSessionIds = new Set<string>();
 
   onEvent(callback: Listener): { dispose: () => void } {
     this.listeners.add(callback);
@@ -108,10 +100,6 @@ export class AgentSession {
         console.error("[pulsar-acp-agent] event listener failed", error);
       }
     }
-  }
-
-  isReady(): boolean {
-    return this.sessionId != null;
   }
 
   start(): Promise<void> {
@@ -134,6 +122,7 @@ export class AgentSession {
       this.sessionCwd = null;
       this.cancelPendingPermissions();
       this.cleanupTerminals();
+      this.loadedSessionIds.clear();
     }
 
     const commandLine: string =
@@ -195,6 +184,7 @@ export class AgentSession {
       this.promptCapabilities = null;
       this.cancelPendingPermissions();
       this.cleanupTerminals();
+      this.loadedSessionIds.clear();
       this.emit({ type: "exit", code, signal });
     });
 
@@ -235,6 +225,7 @@ export class AgentSession {
     this.emit({
       type: "initialized",
       info: init.agentInfo ?? null,
+      capabilities: this.agentCapabilities,
       authMethods: this.authMethods,
       supportsImages: this.promptCapabilities?.image === true,
     });
@@ -276,8 +267,8 @@ export class AgentSession {
     }
     this.sessionId = session.sessionId;
     this.sessionCwd = cwd;
-    this.emit({ type: "ready", session, source: "start" });
-    this.emit({ type: "status", text: this.readyStatus(session) });
+    this.loadedSessionIds.add(session.sessionId);
+    this.emit({ type: "ready", source: "start" });
     this.refreshSessionList();
   }
 
@@ -333,9 +324,13 @@ export class AgentSession {
         sessionId: this.sessionId,
         prompt,
       });
+      // Clear `running` before emitting so listeners that re-render controls
+      // (e.g. the "+ New" button) see the idle state. The finally is a safety net.
+      this.running = false;
       this.emit({ type: "turn-end", stopReason: result?.stopReason });
       return result;
     } catch (error) {
+      this.running = false;
       this.emit({ type: "turn-end" });
       throw error;
     } finally {
@@ -351,8 +346,6 @@ export class AgentSession {
           type: "error",
           message: `Failed to cancel agent turn: ${message}`,
         });
-        this.running = false;
-        this.emit({ type: "turn-end" });
       });
     } else if (this.child) {
       this.child.kill("SIGTERM");
@@ -589,17 +582,6 @@ export class AgentSession {
     return `Sign-in required${reason}. Run \`${command}\` in a terminal, then press Restart.`;
   }
 
-  private readyStatus(session: acp.NewSessionResponse): string {
-    const models = (session as { models?: SessionModelsExt }).models;
-    if (models && Array.isArray(models.availableModels)) {
-      const current = models.availableModels.find(
-        (m) => m.modelId === models.currentModelId,
-      );
-      if (current) return `Ready \u00b7 ${current.name}`;
-    }
-    return "Ready";
-  }
-
   private assertSessionId(sessionId: acp.SessionId): void {
     if (this.sessionId === sessionId) return;
     throw rpcError(
@@ -635,6 +617,12 @@ export class AgentSession {
     filePath: string,
     forWrite: boolean,
   ): Promise<void> {
+    if (!path.isAbsolute(filePath)) {
+      throw rpcError(
+        `File system path must be an absolute path: ${filePath}`,
+        -32602,
+      );
+    }
     const target = forWrite
       ? await this.realPathForWrite(filePath)
       : await fs.promises.realpath(filePath);
@@ -723,6 +711,13 @@ export class AgentSession {
     return this.agentCapabilities?.sessionCapabilities?.delete != null;
   }
 
+  // True when the agent already has this session loaded in memory. The client
+  // must re-activate such a session instead of calling `session/load` again,
+  // which agents reject as already loaded.
+  isSessionLoaded(id: string): boolean {
+    return this.loadedSessionIds.has(id);
+  }
+
   async deleteSession(
     id: string,
     cwd?: string,
@@ -742,6 +737,7 @@ export class AgentSession {
       }
       await this.assertSessionCwdAllowed(scopedCwd, "delete");
       await this.connection.deleteSession({ sessionId: id });
+      this.loadedSessionIds.delete(id);
       if (deletedActive) {
         this.sessionId = null;
         this.cleanupTerminals();
@@ -763,8 +759,9 @@ export class AgentSession {
       this.sessionId = session.sessionId;
       this.sessionCwd = cwd;
       this.cleanupTerminals();
-      this.emit({ type: "ready", session, source: "new" });
-      this.emit({ type: "status", text: this.readyStatus(session) });
+      this.loadedSessionIds.add(session.sessionId);
+      this.switching = false;
+      this.emit({ type: "ready", source: "new" });
       this.refreshSessionList();
     } finally {
       this.switching = false;
@@ -774,9 +771,7 @@ export class AgentSession {
   activateCachedSession(id: string): void {
     this.sessionId = id;
     this.cleanupTerminals();
-    const fakeSession = { sessionId: id } as acp.NewSessionResponse;
-    this.emit({ type: "ready", session: fakeSession, source: "load" });
-    this.emit({ type: "status", text: "Ready" });
+    this.emit({ type: "ready", source: "load" });
     this.refreshSessionList();
   }
 
@@ -800,9 +795,9 @@ export class AgentSession {
       this.pendingSessionId = null;
       this.sessionCwd = sessionCwd;
       this.cleanupTerminals();
-      const fakeSession = { sessionId: id } as acp.NewSessionResponse;
-      this.emit({ type: "ready", session: fakeSession, source: "load" });
-      this.emit({ type: "status", text: "Ready" });
+      this.loadedSessionIds.add(id);
+      this.switching = false;
+      this.emit({ type: "ready", source: "load" });
       this.refreshSessionList();
     } catch (error) {
       this.pendingSessionId = null;
