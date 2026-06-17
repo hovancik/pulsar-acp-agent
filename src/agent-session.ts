@@ -273,26 +273,16 @@ export class AgentSession {
   }
 
   private cwd(): string {
-    const override: string = atom.config.get("pulsar-acp-agent.cwd");
-    if (override && override.trim()) {
-      return this.assertAbsoluteCwd(
-        override.trim(),
-        "configured working directory",
-      );
-    }
     const paths: string[] = atom.project.getPaths();
     if (paths && paths.length > 0) {
-      return this.assertAbsoluteCwd(paths[0], "project folder");
+      const cwd = paths[0];
+      if (path.isAbsolute(cwd)) return cwd;
+      throw new Error(
+        `Pulsar ACP Agent project folder must be an absolute path: ${cwd}`,
+      );
     }
     throw new Error(
-      "Open a project folder or set Pulsar ACP Agent -> Working directory before starting the agent.",
-    );
-  }
-
-  private assertAbsoluteCwd(cwd: string, source: string): string {
-    if (path.isAbsolute(cwd)) return cwd;
-    throw new Error(
-      `Pulsar ACP Agent ${source} must be an absolute path: ${cwd}`,
+      "Open a project folder before starting the agent.",
     );
   }
 

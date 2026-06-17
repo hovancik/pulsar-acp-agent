@@ -65,13 +65,6 @@
       "order": 1,
       "title": "Agent command",
       "description": "Full command line for an executable that speaks ACP over stdio. Examples: `copilot --acp --stdio`, `gemini --experimental-acp`. Wrap a path that contains spaces in double quotes."
-    },
-    "cwd": {
-      "type": "string",
-      "default": "",
-      "order": 2,
-      "title": "Working directory",
-      "description": "Absolute path used as the session working directory. Leave blank to use the first open project folder."
     }
   }
 }
