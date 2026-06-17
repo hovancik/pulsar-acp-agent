@@ -66,10 +66,9 @@ the top of the panel. Click it to expand the list of past sessions and switch
 between them. If the agent also advertises `session/delete`, a `×` button
 appears on hover to permanently remove a session.
 
-The session working directory defaults to the first open project folder.
-Multi-root workspaces are not supported yet: only the configured working
-directory, or the first open project folder when no directory is configured, is
-sent to the agent and allowed for file access.
+The session working directory is always the first open project folder.
+Multi-root workspaces are not supported yet: only the first open project folder
+is sent to the agent and allowed for file access.
 
 ## Develop
 
