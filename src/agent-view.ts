@@ -45,6 +45,7 @@ export class PulsarAcpAgentView {
   private streamRole: string | null = null;
   private streamMessageId: string | null = null;
   private streamBody: HTMLElement | null = null;
+  private stickToBottom = true;
 
   private statusEl!: HTMLElement;
   private liveStatusEl!: HTMLElement;
@@ -176,6 +177,7 @@ export class PulsarAcpAgentView {
 
     this.conversation = document.createElement("div");
     this.conversation.classList.add("pulsar-acp-agent-conversation");
+    this.attachConversationScrollListener();
 
     const footer = document.createElement("div");
     footer.classList.add("pulsar-acp-agent-footer");
@@ -530,6 +532,7 @@ export class PulsarAcpAgentView {
     this.preparingPrompt = false;
     this.clearThumbnails();
     this.endStreamingBlocks();
+    this.stickToBottom = true;
   }
 
   private startNewSession(): void {
@@ -600,11 +603,15 @@ export class PulsarAcpAgentView {
     fresh.className = this.conversation.className;
     this.conversation.replaceWith(fresh);
     this.conversation = fresh;
+    this.stickToBottom = true;
+    this.attachConversationScrollListener();
   }
 
   private swapInConversation(el: HTMLElement): void {
     this.conversation.replaceWith(el);
     this.conversation = el;
+    this.stickToBottom = true;
+    this.attachConversationScrollListener();
   }
 
   private handleEvent(event: AgentEvent): void {
@@ -635,6 +642,7 @@ export class PulsarAcpAgentView {
           this.clearConversation();
         }
         if (event.source === "load") {
+          this.stickToBottom = true;
           this.conversation.scrollTop = this.conversation.scrollHeight;
         }
         this.sessionsBar.style.display = "";
@@ -1363,13 +1371,17 @@ export class PulsarAcpAgentView {
     this.renderLiveRow();
   }
 
+  private attachConversationScrollListener(): void {
+    this.conversation.addEventListener("scroll", () => {
+      this.stickToBottom =
+        this.conversation.scrollHeight - this.conversation.scrollTop <=
+        this.conversation.clientHeight + 50;
+    });
+  }
+
   private scrollToBottom(): void {
-    const isAtBottom =
-      this.conversation.scrollHeight - this.conversation.scrollTop <=
-      this.conversation.clientHeight + 50;
-    if (isAtBottom) {
-      this.conversation.scrollTop = this.conversation.scrollHeight;
-    }
+    if (!this.stickToBottom) return;
+    this.conversation.scrollTop = this.conversation.scrollHeight;
   }
 
   getTitle(): string {
