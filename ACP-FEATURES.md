@@ -93,8 +93,9 @@ terminal whose output is shown in the panel.
 | Model selection | ⬜ | Switching models via session config options / a model selector. |
 | Session modes (`session/set_mode`) | ⬜ | We display the current mode but cannot switch it (e.g. ask vs. code). |
 | Session config options | ⬜ | Generic per-session selectors an agent can expose. |
+| Host context hint | ✅ | A configurable first-prompt hint tells the agent it is connected through Pulsar ACP Agent inside Pulsar, plus session `_meta` for protocol-aware agents. |
 | MCP servers | ⬜ | `session/new` is called with an empty `mcpServers` list; we could forward user-configured MCP servers to the agent. |
-| Extensibility (`_meta`) | 🟡 | We read a `terminal-auth` `_meta` hint to build login guidance; `_meta` is the spec's escape hatch for vendor data. |
+| Extensibility (`_meta`) | 🟡 | We read a `terminal-auth` hint to build login guidance and send host-context metadata for protocol-aware agents; `_meta` is the spec's escape hatch for vendor data. |
 
 ## Suggested priorities
 

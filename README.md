@@ -28,6 +28,7 @@ copilot login
 Defaults:
 
 - command: `copilot --acp --stdio`
+- send host context: enabled
 
 If Pulsar cannot find `copilot`, set the full command line with an absolute
 path (keep the arguments) in:
@@ -44,6 +45,12 @@ On Linux this may be something like:
 
 Wrap a path that contains spaces in double quotes, e.g.
 `"C:\Program Files\agent\agent.exe" --acp --stdio`.
+
+By default, Pulsar ACP Agent also sends a short host-context hint once per
+session so the agent knows the conversation is happening through Pulsar, while
+also making clear that the agent cannot directly control Pulsar's UI. Disable
+**Send host context** in package settings if you do not want this extra context
+included in prompts.
 
 ## Use
 
@@ -107,6 +114,7 @@ The SDK is ESM-only, so esbuild bundles it and `zod` into `lib/main.js`.
 | `session/request_permission` | yes |
 | `terminal` | yes, commands run from the session working directory |
 | `authenticate` | yes, uses the first auth method advertised by the agent |
+| host context hint | yes, sent once per session by default |
 
 ## Security
 

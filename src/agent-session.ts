@@ -14,10 +14,34 @@ const PROTOCOL_VERSION = acp.PROTOCOL_VERSION;
 const STARTUP_TIMEOUT_MS = 30_000;
 const DEFAULT_OUTPUT_BYTE_LIMIT = 64 * 1024;
 const MAX_OUTPUT_BYTE_LIMIT = 1024 * 1024;
+const HOST_CONTEXT_START = "<pulsar-acp-agent-host-context>";
+const HOST_CONTEXT_END = "</pulsar-acp-agent-host-context>";
+const HOST_CONTEXT_MESSAGE = [
+  "Host context: You are connected to the user through Pulsar ACP Agent,",
+  "a Pulsar editor package using the Agent Client Protocol.",
+  "The user sees this conversation in Pulsar, not in a standalone terminal.",
+  "You can use ACP file, terminal, and permission capabilities exposed by the client,",
+  "but you cannot directly click, reload, or inspect Pulsar UI unless the user does it.",
+  "Do not treat this host-context note as the user's request, and do not use it",
+  "for session titles, conversation summaries, or generated titles.",
+].join(" ");
+const HOST_CONTEXT_TEXT = [
+  HOST_CONTEXT_START,
+  HOST_CONTEXT_MESSAGE,
+  HOST_CONTEXT_END,
+].join("\n");
 const CLIENT_INFO = {
   name: "pulsar-acp-agent",
   title: "Pulsar ACP Agent",
   version: __PULSAR_ACP_AGENT_VERSION__,
+};
+const HOST_CONTEXT_META = {
+  "pulsar-acp-agent/host": {
+    editor: "Pulsar",
+    client: CLIENT_INFO.name,
+    title: CLIENT_INFO.title,
+    version: CLIENT_INFO.version,
+  },
 };
 
 export type AgentEvent =
@@ -86,6 +110,7 @@ export class AgentSession {
   >();
   private terminals = new Map<string, TerminalRecord>();
   private loadedSessionIds = new Set<string>();
+  private hostContextSentSessionIds = new Set<string>();
 
   onEvent(callback: Listener): { dispose: () => void } {
     this.listeners.add(callback);
@@ -253,7 +278,7 @@ export class AgentSession {
     try {
       session = await this.withStartupTimeout(
         Promise.race([
-          connection.newSession({ cwd, mcpServers: [] }),
+          connection.newSession(this.newSessionRequest(cwd)),
           processError,
         ]),
         "session/new",
@@ -290,6 +315,79 @@ export class AgentSession {
     return this.promptCapabilities?.image === true;
   }
 
+  private shouldSendHostContext(): boolean {
+    return atom.config.get("pulsar-acp-agent.sendHostContext") !== false;
+  }
+
+  private hostContextMeta(): { [key: string]: unknown } | undefined {
+    return this.shouldSendHostContext() ? HOST_CONTEXT_META : undefined;
+  }
+
+  private newSessionRequest(cwd: string): acp.NewSessionRequest {
+    const request: acp.NewSessionRequest = { cwd, mcpServers: [] };
+    const meta = this.hostContextMeta();
+    if (meta) request._meta = meta;
+    return request;
+  }
+
+  private loadSessionRequest(
+    sessionId: acp.SessionId,
+    cwd: string,
+  ): acp.LoadSessionRequest {
+    const request: acp.LoadSessionRequest = {
+      sessionId,
+      cwd,
+      mcpServers: [],
+    };
+    const meta = this.hostContextMeta();
+    if (meta) request._meta = meta;
+    return request;
+  }
+
+  private appendHostContext(prompt: acp.ContentBlock[]): void {
+    if (
+      this.sessionId &&
+      this.shouldSendHostContext() &&
+      !this.hostContextSentSessionIds.has(this.sessionId)
+    ) {
+      prompt.push({ type: "text", text: HOST_CONTEXT_TEXT });
+      this.hostContextSentSessionIds.add(this.sessionId);
+    }
+  }
+
+  private filterHostContextUpdate(
+    update: acp.SessionUpdate,
+  ): acp.SessionUpdate | null {
+    if (
+      update.sessionUpdate !== "user_message_chunk" ||
+      update.content.type !== "text"
+    ) {
+      return update;
+    }
+    const text = update.content.text || "";
+    const filtered = this.stripHostContext(text);
+    if (filtered === text) return update;
+    if (!filtered) return null;
+    return {
+      ...update,
+      content: { ...update.content, text: filtered },
+    };
+  }
+
+  private stripHostContext(text: string): string {
+    const start = text.indexOf(HOST_CONTEXT_START);
+    if (start === -1) return text;
+    const end = text.indexOf(
+      HOST_CONTEXT_END,
+      start + HOST_CONTEXT_START.length,
+    );
+    if (end === -1) return text;
+    const before = text.slice(0, start);
+    const after = text.slice(end + HOST_CONTEXT_END.length);
+    const stripped = `${before}${after}`;
+    return before ? stripped : stripped.replace(/^\s+/, "");
+  }
+
   async prompt(
     text: string,
     images?: Array<{ data: string; mimeType: string }>,
@@ -310,6 +408,7 @@ export class AgentSession {
           prompt.push({ type: "image", data: img.data, mimeType: img.mimeType });
         }
       }
+      this.appendHostContext(prompt);
       const result = await this.connection.prompt({
         sessionId: this.sessionId,
         prompt,
@@ -356,10 +455,12 @@ export class AgentSession {
       sessionUpdate: async (params: acp.SessionNotification) => {
         const expectedId = this.pendingSessionId ?? this.sessionId;
         if (params.sessionId !== expectedId) return;
+        const update = this.filterHostContextUpdate(params.update);
+        if (!update) return;
         this.emit({
           type: "update",
           sessionId: params.sessionId,
-          update: params.update,
+          update,
         });
       },
       requestPermission: async (params: acp.RequestPermissionRequest) =>
@@ -745,7 +846,9 @@ export class AgentSession {
     this.switching = true;
     try {
       const cwd = this.cwd();
-      const session = await this.connection.newSession({ cwd, mcpServers: [] });
+      const session = await this.connection.newSession(
+        this.newSessionRequest(cwd),
+      );
       this.sessionId = session.sessionId;
       this.sessionCwd = cwd;
       this.cleanupTerminals();
@@ -776,11 +879,9 @@ export class AgentSession {
     try {
       const sessionCwd = cwd ?? this.cwd();
       await this.assertSessionCwdAllowed(sessionCwd, "load");
-      await this.connection.loadSession({
-        sessionId: id,
-        cwd: sessionCwd,
-        mcpServers: [],
-      });
+      await this.connection.loadSession(
+        this.loadSessionRequest(id, sessionCwd),
+      );
       this.sessionId = id;
       this.pendingSessionId = null;
       this.sessionCwd = sessionCwd;

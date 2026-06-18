@@ -67,6 +67,13 @@
       "order": 1,
       "title": "Agent command",
       "description": "Full command line for an executable that speaks ACP over stdio. Examples: `copilot --acp --stdio`, `gemini --experimental-acp`. Wrap a path that contains spaces in double quotes."
+    },
+    "sendHostContext": {
+      "type": "boolean",
+      "default": true,
+      "order": 2,
+      "title": "Send host context",
+      "description": "Tell the agent once per session that it is connected through Pulsar ACP Agent inside Pulsar. This helps agents answer accurately about what they can and cannot do in the editor."
     }
   }
 }
