@@ -1249,6 +1249,32 @@ export class PulsarAcpAgentView {
       if (contentEl.hasChildNodes()) block.appendChild(contentEl);
     }
 
+    // Prominent command/URL extracted from rawInput
+    if (toolCall?.rawInput != null && toolCall.kind != null) {
+      const raw = toolCall.rawInput as Record<string, unknown>;
+      const commands: string[] = [];
+      if (toolCall.kind === "execute") {
+        if (typeof raw["command"] === "string") {
+          commands.push(raw["command"]);
+        } else if (Array.isArray(raw["commands"])) {
+          for (const c of raw["commands"])
+            if (typeof c === "string") commands.push(c);
+        }
+      } else if (toolCall.kind === "fetch") {
+        if (typeof raw["url"] === "string") commands.push(raw["url"]);
+      }
+      if (commands.length > 0) {
+        const cmdEl = document.createElement("div");
+        cmdEl.classList.add("pulsar-acp-agent-permission-commands");
+        for (const cmd of commands) {
+          const pre = document.createElement("pre");
+          pre.textContent = cmd;
+          cmdEl.appendChild(pre);
+        }
+        block.appendChild(cmdEl);
+      }
+    }
+
     // Collapsible raw input
     if (toolCall?.rawInput != null) {
       const details = document.createElement("details");

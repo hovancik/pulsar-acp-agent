@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added delete button per session entry (shown when the agent advertises `sessionCapabilities.delete`).
 - Agent responses are now rendered as Markdown (GFM). Text streams as plain text during generation and is formatted once the message is complete.
 - Added a configurable host-context hint so agents know they are connected through Pulsar ACP Agent inside Pulsar.
+- Tool-call cards now show the command or URL from `rawInput` and a collapsible raw-input section.
 
 ### Fixed
 

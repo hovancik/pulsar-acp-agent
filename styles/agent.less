@@ -266,13 +266,24 @@
     margin-bottom: 6px;
   }
 
-  .pulsar-acp-agent-permission-locations {
+  .pulsar-acp-agent-permission-locations,
+  .pulsar-acp-agent-permission-commands {
     margin-bottom: 6px;
     font-size: 0.9em;
-    opacity: 0.8;
 
-    .pulsar-acp-agent-permission-location {
+    .pulsar-acp-agent-permission-location,
+    pre {
+      margin: 0 0 4px;
+      padding: 4px 6px;
+      background-color: @base-background-color;
+      border-radius: @component-border-radius;
       font-family: monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
     }
   }
 

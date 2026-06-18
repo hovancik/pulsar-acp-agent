@@ -70,7 +70,7 @@ terminal whose output is shown in the panel.
 | `agent_message_chunk` | ✅ | Streamed assistant text. |
 | `agent_thought_chunk` | ✅ | Reasoning, rendered distinctly. |
 | `user_message_chunk` | ✅ | Echoed user content. |
-| `tool_call` / `tool_call_update` | ✅ | Rendered with title, status, and content. |
+| `tool_call` / `tool_call_update` | ✅ | Rendered with title, status, content; command/URL extracted from `rawInput`; collapsible raw-input section. |
 | `plan` | ✅ | Execution plan list. |
 | `current_mode_update` | 🟡 | Shown in the status line (display only — see modes below). |
 | `usage_update` | ✅ | Context-token usage shown in the status line. |

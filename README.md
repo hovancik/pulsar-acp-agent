@@ -1,4 +1,4 @@
-# Pulsar ACP Agent
+# 🤖 Pulsar ACP Agent
 
 Pulsar package for using [Agent Client Protocol (ACP)](https://agentclientprotocol.com)-compatible coding agents inside the editor.
 
