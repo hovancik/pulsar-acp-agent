@@ -127,6 +127,10 @@
 .pulsar-acp-agent-conversation {
   flex: 1;
   overflow-y: auto;
+  // Disable scroll anchoring: late-loading image previews grow above the
+  // streaming output, and the browser's anchor adjustment would bump scrollTop
+  // and fire a scroll event that breaks the stick-to-bottom autoscroll.
+  overflow-anchor: none;
   padding: @component-padding;
 }
 

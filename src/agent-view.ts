@@ -51,6 +51,9 @@ export class PulsarAcpAgentView {
   private streamBody: HTMLElement | null = null;
   private streamRawText = "";
   private stickToBottom = true;
+  private lastUserScrollAt = 0;
+  private pointerDownInConversation = false;
+  private scrollBoundConversations = new WeakSet<HTMLElement>();
 
   private statusEl!: HTMLElement;
   private liveStatusEl!: HTMLElement;
@@ -850,7 +853,9 @@ export class PulsarAcpAgentView {
     this.renderMarkdown(body, text);
     for (const img of images) {
       body.appendChild(
-        this.createImageCanvas(img.file, "pulsar-acp-agent-inline-image"),
+        this.createImageCanvas(img.file, "pulsar-acp-agent-inline-image", () =>
+          this.scrollToBottom(),
+        ),
       );
     }
   }
@@ -935,7 +940,11 @@ export class PulsarAcpAgentView {
   // ponytail: canvas, not <img src=blob:/data:>, to avoid the CodeQL
   // untrusted-URL-in-sink alert for user-selected images (see c29f767).
   // Don't "simplify" this back to an <img>.
-  private createImageCanvas(file: File, className?: string): HTMLCanvasElement {
+  private createImageCanvas(
+    file: File,
+    className?: string,
+    onResize?: () => void,
+  ): HTMLCanvasElement {
     const canvas = document.createElement("canvas");
     if (className) canvas.classList.add(className);
     canvas.setAttribute("role", "img");
@@ -955,6 +964,9 @@ export class PulsarAcpAgentView {
         }
         context.drawImage(bitmap, 0, 0);
         bitmap.close();
+        // The canvas grows from 0 height to the image height here, after the
+        // message already scrolled. Re-scroll so autoscroll keeps following.
+        onResize?.();
       })
       .catch((error) =>
         console.warn("[pulsar-acp-agent] image preview failed", error),
@@ -1488,10 +1500,42 @@ export class PulsarAcpAgentView {
   }
 
   private attachConversationScrollListener(): void {
-    this.conversation.addEventListener("scroll", () => {
-      this.stickToBottom =
-        this.conversation.scrollHeight - this.conversation.scrollTop <=
-        this.conversation.clientHeight + 50;
+    // Cached conversations are re-swapped on session switch; bind each element
+    // only once so listeners don't accumulate.
+    if (this.scrollBoundConversations.has(this.conversation)) return;
+    this.scrollBoundConversations.add(this.conversation);
+    // Capture the element so each conversation's handlers reference their own
+    // node rather than whichever conversation is currently active.
+    const conversation = this.conversation;
+    const markUser = () => {
+      this.lastUserScrollAt = Date.now();
+    };
+    conversation.addEventListener("wheel", markUser, { passive: true });
+    conversation.addEventListener("keydown", markUser);
+    conversation.addEventListener("pointerdown", () => {
+      this.pointerDownInConversation = true;
+    });
+    conversation.addEventListener("pointerup", () => {
+      this.pointerDownInConversation = false;
+    });
+
+    // Only a user-driven scroll (wheel, keyboard, touch, or scrollbar drag)
+    // unsticks autoscroll. Layout-induced scroll events — e.g. a late-loading
+    // image canvas growing above the output — must not flip the flag, or the
+    // view would freeze partway up. Reaching the bottom always re-sticks.
+    conversation.addEventListener("scroll", () => {
+      const distance =
+        conversation.scrollHeight -
+        conversation.scrollTop -
+        conversation.clientHeight;
+      if (distance <= 50) {
+        this.stickToBottom = true;
+      } else if (
+        this.pointerDownInConversation ||
+        Date.now() - this.lastUserScrollAt < 200
+      ) {
+        this.stickToBottom = false;
+      }
     });
   }
 
