@@ -262,7 +262,50 @@
   margin-bottom: @component-padding;
 
   .pulsar-acp-agent-permission-question {
+    font-weight: bold;
     margin-bottom: 6px;
+  }
+
+  .pulsar-acp-agent-permission-locations {
+    margin-bottom: 6px;
+    font-size: 0.9em;
+    opacity: 0.8;
+
+    .pulsar-acp-agent-permission-location {
+      font-family: monospace;
+    }
+  }
+
+  .pulsar-acp-agent-permission-content {
+    margin-bottom: 6px;
+    border-radius: @component-border-radius;
+    overflow: hidden;
+  }
+
+  .pulsar-acp-agent-permission-raw {
+    margin-bottom: 6px;
+    font-size: 0.85em;
+
+    summary {
+      cursor: pointer;
+      opacity: 0.7;
+      user-select: none;
+
+      &:hover {
+        opacity: 1;
+      }
+    }
+
+    pre {
+      margin: 4px 0 0;
+      padding: 4px 6px;
+      background-color: @base-background-color;
+      border-radius: @component-border-radius;
+      overflow-x: auto;
+      font-size: 0.9em;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
   }
 
   .pulsar-acp-agent-permission-options {
@@ -272,6 +315,10 @@
 
     .pulsar-acp-agent-reject {
       opacity: 0.8;
+    }
+
+    .pulsar-acp-agent-allow-always {
+      font-weight: bold;
     }
   }
 }

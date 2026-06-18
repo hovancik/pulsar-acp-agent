@@ -1188,18 +1188,81 @@ export class PulsarAcpAgentView {
     params: acp.RequestPermissionRequest,
     respond: (outcome: acp.RequestPermissionResponse) => void,
   ): void {
+    const toolCall = params.toolCall;
+    const toolTitle = toolCall?.title || "an action";
+
     const block = document.createElement("div");
     block.classList.add("pulsar-acp-agent-permission");
+    if (toolCall?.kind) block.dataset.kind = toolCall.kind;
 
+    const kindIcons: Record<string, string> = {
+      read: "file-text",
+      edit: "pencil",
+      delete: "trashcan",
+      move: "arrow-right",
+      search: "search",
+      execute: "terminal",
+      think: "light-bulb",
+      fetch: "cloud-download",
+      switch_mode: "git-compare",
+      other: "tools",
+    };
+    const iconName = toolCall?.kind ? (kindIcons[toolCall.kind] ?? "tools") : "tools";
+
+    // Helper: build icon span + label text
+    const makeLabel = (label: string): DocumentFragment => {
+      const frag = document.createDocumentFragment();
+      const iconEl = document.createElement("span");
+      iconEl.classList.add("icon", `icon-${iconName}`);
+      frag.appendChild(iconEl);
+      frag.appendChild(document.createTextNode(` ${label}`));
+      return frag;
+    };
+
+    // Header: kind icon + title
     const question = document.createElement("div");
     question.classList.add("pulsar-acp-agent-permission-question");
-    const toolTitle =
-      params.toolCall && params.toolCall.title
-        ? params.toolCall.title
-        : "an action";
-    question.textContent = `Allow the agent to run: ${toolTitle}?`;
+    question.appendChild(makeLabel(`Allow: ${toolTitle}?`));
     block.appendChild(question);
 
+    // Affected locations
+    if (toolCall?.locations && toolCall.locations.length > 0) {
+      const locations = document.createElement("div");
+      locations.classList.add("pulsar-acp-agent-permission-locations");
+      for (const loc of toolCall.locations) {
+        const entry = document.createElement("div");
+        entry.classList.add("pulsar-acp-agent-permission-location");
+        entry.textContent = loc.line != null ? `${loc.path}:${loc.line}` : loc.path;
+        locations.appendChild(entry);
+      }
+      block.appendChild(locations);
+    }
+
+    // Tool content (diffs, text — not terminal, which has no output at permission time)
+    if (toolCall?.content && toolCall.content.length > 0) {
+      const contentEl = document.createElement("div");
+      contentEl.classList.add("pulsar-acp-agent-permission-content");
+      for (const item of toolCall.content) {
+        if (item.type === "terminal") continue;
+        contentEl.appendChild(this.renderToolContent(item));
+      }
+      if (contentEl.hasChildNodes()) block.appendChild(contentEl);
+    }
+
+    // Collapsible raw input
+    if (toolCall?.rawInput != null) {
+      const details = document.createElement("details");
+      details.classList.add("pulsar-acp-agent-permission-raw");
+      const summary = document.createElement("summary");
+      summary.textContent = "Raw input";
+      const pre = document.createElement("pre");
+      pre.textContent = JSON.stringify(toolCall.rawInput, null, 2);
+      details.appendChild(summary);
+      details.appendChild(pre);
+      block.appendChild(details);
+    }
+
+    // Option buttons with kind-aware styling
     const buttons = document.createElement("div");
     buttons.classList.add("pulsar-acp-agent-permission-options");
     for (const option of params.options || []) {
@@ -1210,13 +1273,17 @@ export class PulsarAcpAgentView {
         for (const child of Array.from(buttons.children))
           (child as HTMLButtonElement).disabled = true;
         block.dataset.resolved = option.optionId;
-        question.textContent = `${option.name} \u2014 ${toolTitle}`;
+        question.replaceChildren(makeLabel(`${option.name} \u2014 ${toolTitle}`));
       });
-      if (option.kind && option.kind.startsWith("reject"))
+      button.dataset.optionKind = option.kind;
+      if (option.kind === "reject_once" || option.kind === "reject_always")
         button.classList.add("pulsar-acp-agent-reject");
+      if (option.kind === "allow_always")
+        button.classList.add("pulsar-acp-agent-allow-always");
       buttons.appendChild(button);
     }
     block.appendChild(buttons);
+
     this.conversation.appendChild(block);
     this.scrollToBottom();
   }
