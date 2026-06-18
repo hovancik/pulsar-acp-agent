@@ -883,13 +883,9 @@ export class PulsarAcpAgentView {
           this.appendError(`Could not read image "${file.name}".`);
           return;
         }
-        const bytes = new Uint8Array(reader.result);
-        let binary = "";
-        for (let i = 0; i < bytes.length; i++)
-          binary += String.fromCharCode(bytes[i]);
         const image = {
           id: this.nextImageId++,
-          data: btoa(binary),
+          data: Buffer.from(reader.result).toString("base64"),
           mimeType: file.type,
           file,
         };
@@ -936,6 +932,9 @@ export class PulsarAcpAgentView {
     this.thumbnailStrip.style.display = "none";
   }
 
+  // ponytail: canvas, not <img src=blob:/data:>, to avoid the CodeQL
+  // untrusted-URL-in-sink alert for user-selected images (see c29f767).
+  // Don't "simplify" this back to an <img>.
   private createImageCanvas(file: File, className?: string): HTMLCanvasElement {
     const canvas = document.createElement("canvas");
     if (className) canvas.classList.add(className);
