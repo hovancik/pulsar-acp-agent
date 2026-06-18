@@ -59,14 +59,16 @@ included in prompts.
 - Send: `Enter`
 - Newline: `Shift+Enter`
 - Stop: cancel current turn
-- Restart: kill and restart the agent process
+- Restart: button in the agent details panel (click the agent name)
 
 If the agent advertises image prompt support, attach PNG, JPEG, GIF, or WebP
 images up to 5 MiB via the attachment button, drag-and-drop, or paste.
 
-Once connected, the header shows the agent's name. Click the info button next to
-it to reveal the agent's version, advertised capabilities, and any metadata it
-reports.
+Once connected, the header shows the agent's name. Click it to open the agent
+details: version, advertised capabilities, any reported metadata, and a Restart
+button. The name also shows live activity (connecting, working), and a status
+row below the header shows the current mode and token usage when the agent
+reports them.
 
 If the agent advertises `session/list` support, a **Sessions** bar appears at
 the top of the panel. Click it to expand the list of past sessions and switch

@@ -9,6 +9,7 @@ Guidance for AI agents and contributors working on this package.
   possible, lay out the trade-offs and agree on a direction first.
 - **Be minimalistic.** Prefer the smallest change that fully solves the problem.
   Avoid new dependencies, abstractions, and configuration unless clearly needed.
+  Keep commit messages, changelog entries, and doc updates short and direct — no filler words.
 - **Follow Pulsar standards and practices.** Match the conventions used by Pulsar
   core and its packages (Octicons, commands, config schema, dock items, keymaps,
   menus, `atom`/Pulsar APIs). When unsure, look at how existing Pulsar packages do it.

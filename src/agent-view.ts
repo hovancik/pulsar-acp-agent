@@ -55,10 +55,9 @@ export class PulsarAcpAgentView {
   private pointerDownInConversation = false;
   private scrollBoundConversations = new WeakSet<HTMLElement>();
 
-  private statusEl!: HTMLElement;
   private liveStatusEl!: HTMLElement;
-  private agentNameEl!: HTMLElement;
-  private infoButton!: HTMLButtonElement;
+  private agentNameEl!: HTMLButtonElement;
+  private restartButton!: HTMLButtonElement;
   private infoPanel!: HTMLElement;
   private infoPanelOpen = false;
   private storedAgentInfo: acp.Implementation | null = null;
@@ -66,6 +65,8 @@ export class PulsarAcpAgentView {
   private currentMode: string | null = null;
   private currentTokens: string | null = null;
   private lifecycleStatus = "";
+  private agentBusy = false;
+  private agentExited = false;
   private input!: HTMLTextAreaElement;
   private fileInput!: HTMLInputElement;
   private attachButton!: HTMLButtonElement;
@@ -73,7 +74,6 @@ export class PulsarAcpAgentView {
   private conversation!: HTMLElement;
   private sendButton!: HTMLButtonElement;
   private stopButton!: HTMLButtonElement;
-  private restartButton!: HTMLButtonElement;
   private newSessionButton!: HTMLButtonElement;
   private sessionsBar!: HTMLElement;
   private sessionsList!: HTMLElement;
@@ -147,31 +147,13 @@ export class PulsarAcpAgentView {
 
     const row1 = document.createElement("div");
     row1.classList.add("pulsar-acp-agent-header-row1");
-    const title = document.createElement("span");
-    title.classList.add("pulsar-acp-agent-title");
-    title.textContent = "Pulsar ACP Agent";
-    this.agentNameEl = document.createElement("span");
+    this.agentNameEl = document.createElement("button");
     this.agentNameEl.classList.add("pulsar-acp-agent-name");
-    this.agentNameEl.style.display = "none";
-    this.statusEl = document.createElement("span");
-    this.statusEl.classList.add("pulsar-acp-agent-status-spacer");
-    this.infoButton = document.createElement("button");
-    this.infoButton.classList.add(
-      "btn",
-      "icon",
-      "icon-info",
-      "pulsar-acp-agent-info-btn",
-    );
-    this.infoButton.title = "Agent info";
-    this.infoButton.style.display = "none";
-    this.infoButton.addEventListener("click", () => this.toggleInfoPanel());
+    this.agentNameEl.addEventListener("click", () => this.toggleInfoPanel());
     this.restartButton = this.makeButton("Restart", () => this.restart());
     this.restartButton.classList.add("pulsar-acp-agent-restart");
-    row1.appendChild(title);
+    this.restartButton.title = "Restart agent";
     row1.appendChild(this.agentNameEl);
-    row1.appendChild(this.statusEl);
-    row1.appendChild(this.infoButton);
-    row1.appendChild(this.restartButton);
 
     this.liveStatusEl = document.createElement("div");
     this.liveStatusEl.classList.add("pulsar-acp-agent-header-row2");
@@ -307,7 +289,10 @@ export class PulsarAcpAgentView {
     this.newSessionButton = this.makeButton("+ New", () =>
       this.startNewSession(),
     );
-    this.newSessionButton.classList.add("pulsar-acp-agent-new-session");
+    this.newSessionButton.classList.add(
+      "pulsar-acp-agent-new-session",
+      "btn-primary",
+    );
 
     controls.appendChild(this.sessionsToggle);
     controls.appendChild(this.newSessionButton);
@@ -330,6 +315,7 @@ export class PulsarAcpAgentView {
   }
 
   private toggleInfoPanel(): void {
+    if (!this.storedAgentInfo && !this.agentExited) return;
     this.infoPanelOpen = !this.infoPanelOpen;
     if (this.infoPanelOpen) {
       this.renderInfoPanel();
@@ -337,17 +323,39 @@ export class PulsarAcpAgentView {
     } else {
       this.infoPanel.style.display = "none";
     }
-    this.infoButton.classList.toggle(
-      "pulsar-acp-agent-info-btn--active",
+    this.agentNameEl.classList.toggle(
+      "pulsar-acp-agent-name--active",
       this.infoPanelOpen,
     );
+  }
+
+  // Identity plus transient lifecycle/turn activity, shown as a plain
+  // disclosure. Mode and token usage live in the separate live row.
+  private renderPill(): void {
+    const info = this.storedAgentInfo;
+    const name = info ? info.title || info.name : null;
+    const activity = this.agentBusy ? "working\u2026" : this.lifecycleStatus;
+    if (name) {
+      this.agentNameEl.textContent = activity
+        ? `${name} \u00b7 ${activity}`
+        : name;
+    } else {
+      this.agentNameEl.textContent = activity || "Starting\u2026";
+    }
+    this.agentNameEl.style.display = "";
+    const hasPanel = info != null || this.agentExited;
+    this.agentNameEl.disabled = !hasPanel;
+    this.agentNameEl.classList.toggle(
+      "pulsar-acp-agent-name--toggle",
+      hasPanel,
+    );
+    this.agentNameEl.title = hasPanel ? "Agent details" : "";
   }
 
   private renderInfoPanel(): void {
     this.infoPanel.innerHTML = "";
     const info = this.storedAgentInfo;
     const caps = this.storedCapabilities;
-    if (!info) return;
 
     const addRow = (label: string, content: HTMLElement | string): void => {
       const row = document.createElement("div");
@@ -367,7 +375,28 @@ export class PulsarAcpAgentView {
       this.infoPanel.appendChild(row);
     };
 
-    addRow("Version", info.version);
+    // No identity yet (agent exited before initializing): still surface Restart
+    // so a failed start is recoverable from the UI.
+    if (!info) {
+      const statusContent = document.createElement("div");
+      statusContent.classList.add("pulsar-acp-agent-info-version");
+      const statusValue = document.createElement("span");
+      statusValue.classList.add("pulsar-acp-agent-info-value");
+      statusValue.textContent = this.lifecycleStatus || "Not connected.";
+      statusContent.appendChild(statusValue);
+      statusContent.appendChild(this.restartButton);
+      addRow("Status", statusContent);
+      return;
+    }
+
+    const versionValue = document.createElement("span");
+    versionValue.classList.add("pulsar-acp-agent-info-value");
+    versionValue.textContent = info.version;
+    const versionContent = document.createElement("div");
+    versionContent.classList.add("pulsar-acp-agent-info-version");
+    versionContent.appendChild(versionValue);
+    versionContent.appendChild(this.restartButton);
+    addRow("Version", versionContent);
 
     const capsEl = document.createElement("span");
     capsEl.classList.add("pulsar-acp-agent-info-caps");
@@ -515,13 +544,14 @@ export class PulsarAcpAgentView {
     this.storedCapabilities = null;
     this.currentMode = null;
     this.currentTokens = null;
+    this.agentBusy = false;
+    this.agentExited = false;
     this.renderLiveRow();
-    this.agentNameEl.textContent = "";
-    this.agentNameEl.style.display = "none";
-    this.infoButton.style.display = "none";
+    this.renderPill();
     this.infoPanel.style.display = "none";
     this.infoPanel.innerHTML = "";
     this.infoPanelOpen = false;
+    this.agentNameEl.classList.remove("pulsar-acp-agent-name--active");
   }
 
   private clearConversation(): void {
@@ -630,13 +660,7 @@ export class PulsarAcpAgentView {
       case "initialized":
         this.storedAgentInfo = event.info;
         this.storedCapabilities = event.capabilities;
-        if (event.info) {
-          const displayName = event.info.title || event.info.name;
-          this.agentNameEl.textContent = `\u00b7 ${displayName}`;
-          this.agentNameEl.style.display = "";
-          this.infoButton.style.display = "";
-          if (this.infoPanelOpen) this.renderInfoPanel();
-        }
+        if (event.info && this.infoPanelOpen) this.renderInfoPanel();
         this.setLifecycleStatus("Connected");
         this.imageSupportKnown = true;
         this.supportsImages = event.supportsImages;
@@ -645,6 +669,8 @@ export class PulsarAcpAgentView {
         break;
       case "ready":
         this.lifecycleStatus = "";
+        this.agentBusy = false;
+        this.renderPill();
         this.restoreLiveStateFor(this.session.sessionId);
         if (event.source === "new") {
           this.clearConversation();
@@ -662,12 +688,16 @@ export class PulsarAcpAgentView {
         this.renderSessionsList(event.sessions);
         break;
       case "turn-start":
+        this.agentBusy = true;
+        this.renderPill();
         this.stopButton.disabled = false;
         this.updateInputControls();
         this.updateSessionControls();
         this.stderrBody = null;
         break;
       case "turn-end":
+        this.agentBusy = false;
+        this.renderPill();
         this.stopButton.disabled = true;
         this.updateInputControls();
         this.updateSessionControls();
@@ -698,16 +728,26 @@ export class PulsarAcpAgentView {
         this.stopButton.disabled = true;
         this.updateInputControls();
         break;
-      case "exit":
-        this.setLifecycleStatus(
-          `Agent exited${event.code != null ? ` (code ${event.code})` : ""}. Press Restart.`,
-        );
-        this.resetAgentChrome();
+      case "exit": {
+        const detail = `exited${event.code != null ? ` (code ${event.code})` : ""}`;
+        this.agentExited = true;
+        this.agentBusy = false;
+        this.currentMode = null;
+        this.currentTokens = null;
+        this.renderLiveRow();
+        this.setLifecycleStatus(`Agent ${detail}.`);
+        // Auto-open details so Restart stays reachable even if the agent died
+        // before reporting any identity (e.g. a bad agent command).
+        this.infoPanelOpen = true;
+        this.renderInfoPanel();
+        this.infoPanel.style.display = "";
+        this.agentNameEl.classList.add("pulsar-acp-agent-name--active");
         this.resetSessionsChrome();
         this.stopButton.disabled = true;
         this.updateInputControls();
         this.endStreamingBlocks();
         break;
+      }
     }
   }
 
@@ -1466,15 +1506,16 @@ export class PulsarAcpAgentView {
 
   private setLifecycleStatus(text: string): void {
     this.lifecycleStatus = text;
-    this.renderLiveRow();
+    this.renderPill();
   }
 
   private renderLiveRow(): void {
     const parts = [this.currentMode, this.currentTokens].filter(
       (p): p is string => p != null && p.length > 0,
     );
-    this.liveStatusEl.textContent =
-      parts.length > 0 ? parts.join(" \u00b7 ") : this.lifecycleStatus;
+    const text = parts.join(" \u00b7 ");
+    this.liveStatusEl.textContent = text;
+    this.liveStatusEl.style.display = text ? "" : "none";
   }
 
   // Mode and token usage are per-session; remember them so switching back to a
