@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a "Scroll to bottom" button that appears when you scroll up in the conversation, and disappears once you reach the bottom.
 - Added a loading placeholder when opening a stored session: the conversation pane shows a pulsing "Loading session…" overlay while history is replayed, and reveals the restored conversation once ready.
 - Added ACP `terminal/*` capability.
 - Added agent info panel: click the agent name in the header to reveal its version, advertised capabilities and metadata as key/value rows, and a Restart button.

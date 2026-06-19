@@ -181,6 +181,35 @@
   min-height: 0;
 }
 
+.pulsar-acp-agent-scroll-to-bottom {
+  position: absolute;
+  bottom: @component-padding;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px 3px 8px;
+  background-color: @overlay-background-color;
+  border: 1px solid @overlay-border-color;
+  border-radius: 1em;
+  color: @text-color;
+  font-size: 0.85em;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 2px 8px fade(@base-border-color, 80%);
+
+  &::before {
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  &:hover {
+    background-color: @background-color-highlight;
+    color: @text-color-highlight;
+  }
+}
+
 .pulsar-acp-agent-loading-overlay {
   position: absolute;
   inset: 0;

@@ -94,6 +94,7 @@ export class PulsarAcpAgentView {
   private conversation!: HTMLElement;
   private conversationWrapper!: HTMLElement;
   private loadingOverlay!: HTMLElement;
+  private scrollToBottomButton!: HTMLButtonElement;
   private generatingIndicator: HTMLElement | null = null;
   private sendButton!: HTMLButtonElement;
   private stopButton!: HTMLButtonElement;
@@ -331,6 +332,23 @@ export class PulsarAcpAgentView {
     this.element.appendChild(this.buildSessionsBar());
     this.conversationWrapper.appendChild(this.conversation);
     this.conversationWrapper.appendChild(this.loadingOverlay);
+
+    this.scrollToBottomButton = document.createElement("button");
+    this.scrollToBottomButton.classList.add(
+      "pulsar-acp-agent-scroll-to-bottom",
+      "icon",
+      "icon-chevron-down",
+    );
+    this.scrollToBottomButton.textContent = "Scroll to bottom";
+    this.scrollToBottomButton.setAttribute("aria-label", "Scroll to bottom");
+    this.scrollToBottomButton.style.display = "none";
+    this.scrollToBottomButton.addEventListener("click", () => {
+      this.stickToBottom = true;
+      this.updateScrollToBottomButton();
+      this.scrollToBottom();
+    });
+    this.conversationWrapper.appendChild(this.scrollToBottomButton);
+
     this.element.appendChild(this.conversationWrapper);
     this.element.appendChild(footer);
   }
@@ -702,6 +720,7 @@ export class PulsarAcpAgentView {
     this.conversation.replaceWith(fresh);
     this.conversation = fresh;
     this.stickToBottom = true;
+    this.updateScrollToBottomButton();
     this.attachConversationScrollListener();
   }
 
@@ -741,6 +760,7 @@ export class PulsarAcpAgentView {
     this.conversation.replaceWith(el);
     this.conversation = el;
     this.stickToBottom = true;
+    this.updateScrollToBottomButton();
     this.attachConversationScrollListener();
   }
 
@@ -1766,7 +1786,12 @@ export class PulsarAcpAgentView {
       ) {
         this.stickToBottom = false;
       }
+      this.updateScrollToBottomButton();
     });
+  }
+
+  private updateScrollToBottomButton(): void {
+    this.scrollToBottomButton.style.display = this.stickToBottom ? "none" : "";
   }
 
   private scrollToBottom(): void {
