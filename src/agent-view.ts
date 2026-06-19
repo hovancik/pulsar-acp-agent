@@ -70,6 +70,7 @@ export class PulsarAcpAgentView {
   private streamMessageId: string | null = null;
   private streamBody: HTMLElement | null = null;
   private streamRawText = "";
+  private streamRenderHandle: number | null = null;
   private stickToBottom = true;
   private lastUserScrollAt = 0;
   private pointerDownInConversation = false;
@@ -927,13 +928,32 @@ export class PulsarAcpAgentView {
       this.streamMessageId = streamMessageId;
     }
     this.streamRawText += text;
-    this.streamBody.textContent += text;
+    // ponytail: re-render the whole accumulated markdown, coalesced to one
+    // render per frame so bursts of chunks don't reparse O(n) each.
+    this.scheduleStreamRender();
+    this.scrollToBottom();
+  }
+
+  private scheduleStreamRender(): void {
+    if (this.streamRenderHandle !== null) return;
+    this.streamRenderHandle = requestAnimationFrame(() => {
+      this.streamRenderHandle = null;
+      this.flushStreamRender();
+    });
+  }
+
+  private flushStreamRender(): void {
+    if (!this.streamBody) return;
+    this.renderMarkdown(this.streamBody, this.streamRawText);
     this.scrollToBottom();
   }
 
   private endStreamingBlocks(): void {
-    const markdownRoles = new Set(["agent", "thought", "user"]);
-    if (this.streamBody && this.streamRawText && markdownRoles.has(this.streamRole ?? "")) {
+    if (this.streamRenderHandle !== null) {
+      cancelAnimationFrame(this.streamRenderHandle);
+      this.streamRenderHandle = null;
+    }
+    if (this.streamBody && this.streamRawText) {
       this.renderMarkdown(this.streamBody, this.streamRawText);
       this.scrollToBottom();
     }
@@ -950,6 +970,7 @@ export class PulsarAcpAgentView {
   private renderMarkdown(el: HTMLElement, text: string): void {
     const html = marked.parse(text, { async: false });
     el.innerHTML = DOMPurify.sanitize(html);
+    el.classList.add("pulsar-acp-agent-markdown");
   }
 
   private appendMessage(role: string, text: string): HTMLElement {
@@ -1789,6 +1810,9 @@ export class PulsarAcpAgentView {
 
   destroy(): void {
     this.disconnectStartObserver();
+    if (this.streamRenderHandle !== null) {
+      cancelAnimationFrame(this.streamRenderHandle);
+    }
     this.reporter?.clear(this);
     this.sessionTooltips.dispose();
     this.thumbnailTooltips.dispose();

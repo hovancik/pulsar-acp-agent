@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added image attachment support for PNG, JPEG, GIF, and WebP files up to 5 MiB.
 - Added session list in the sessions bar: browse past sessions and switch when the agent supports loading sessions.
 - Added delete button per session entry (shown when the agent advertises `sessionCapabilities.delete`).
-- Agent responses are now rendered as Markdown (GFM). Text streams as plain text during generation and is formatted once the message is complete.
+- Agent responses are now rendered as Markdown (GFM), formatted live as the text streams in.
 - Added a configurable host-context hint so agents know they are connected through Pulsar ACP Agent inside Pulsar.
 - Permission prompts now show the command or URL from `rawInput` and a collapsible raw-input section.
 - Added an in-chat activity indicator at the bottom of the conversation while the agent is busy: "Working…", "Awaiting confirmation…" during a permission prompt, and "Stopping…" after Stop is pressed.
