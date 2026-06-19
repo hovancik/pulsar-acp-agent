@@ -88,6 +88,8 @@ export class PulsarAcpAgentView {
   private attachButton!: HTMLButtonElement;
   private thumbnailStrip!: HTMLElement;
   private conversation!: HTMLElement;
+  private conversationWrapper!: HTMLElement;
+  private loadingOverlay!: HTMLElement;
   private sendButton!: HTMLButtonElement;
   private stopButton!: HTMLButtonElement;
   private newSessionButton!: HTMLButtonElement;
@@ -200,6 +202,19 @@ export class PulsarAcpAgentView {
     this.conversation.classList.add("pulsar-acp-agent-conversation");
     this.attachConversationScrollListener();
 
+    // Wrap the conversation so the loading overlay can cover just this region
+    // (not the header or footer) while history is replayed.
+    this.conversationWrapper = document.createElement("div");
+    this.conversationWrapper.classList.add("pulsar-acp-agent-conversation-wrapper");
+
+    this.loadingOverlay = document.createElement("div");
+    this.loadingOverlay.classList.add("pulsar-acp-agent-loading-overlay");
+    this.loadingOverlay.style.display = "none";
+    const loadingLabel = document.createElement("div");
+    loadingLabel.classList.add("pulsar-acp-agent-loading-label");
+    loadingLabel.textContent = "Loading session\u2026";
+    this.loadingOverlay.appendChild(loadingLabel);
+
     const footer = document.createElement("div");
     footer.classList.add("pulsar-acp-agent-footer");
 
@@ -300,7 +315,9 @@ export class PulsarAcpAgentView {
     this.element.appendChild(header);
     this.element.appendChild(this.infoPanel);
     this.element.appendChild(this.buildSessionsBar());
-    this.element.appendChild(this.conversation);
+    this.conversationWrapper.appendChild(this.conversation);
+    this.conversationWrapper.appendChild(this.loadingOverlay);
+    this.element.appendChild(this.conversationWrapper);
     this.element.appendChild(footer);
   }
 
@@ -613,6 +630,7 @@ export class PulsarAcpAgentView {
 
   private switchToSession(id: string): void {
     if (this.session.running || this.session.switching) return;
+    this.hideLoadingOverlay();
     const currentId = this.session.sessionId;
     const info = this.knownSessions.find((s) => s.sessionId === id);
 
@@ -634,15 +652,17 @@ export class PulsarAcpAgentView {
     }
 
     this.resetConversationState();
-    // Show progress: session/load replays history asynchronously, leaving the
-    // conversation blank until the "ready" event clears this status.
+    // session/load replays history asynchronously; cover the blank pane with a
+    // pulsing overlay until the "ready" event reveals the restored conversation.
     this.currentMode = null;
     this.currentTokens = null;
     this.setLifecycleStatus("Loading session\u2026");
     this.setAgentStatus("connecting");
+    this.showLoadingOverlay();
     this.updateSessionControls();
     this.session.loadSession(id, info?.cwd).catch((error) => {
       // Roll back to the previous session's conversation on failure.
+      this.hideLoadingOverlay();
       if (currentId) {
         const prev = this.sessionConversationCache.get(currentId);
         if (prev) this.swapInConversation(prev);
@@ -662,6 +682,14 @@ export class PulsarAcpAgentView {
     this.conversation = fresh;
     this.stickToBottom = true;
     this.attachConversationScrollListener();
+  }
+
+  private showLoadingOverlay(): void {
+    this.loadingOverlay.style.display = "";
+  }
+
+  private hideLoadingOverlay(): void {
+    this.loadingOverlay.style.display = "none";
   }
 
   private swapInConversation(el: HTMLElement): void {
@@ -690,6 +718,7 @@ export class PulsarAcpAgentView {
         break;
       case "ready":
         this.lifecycleStatus = "";
+        this.hideLoadingOverlay();
         this.renderPill();
         this.setAgentStatus("ready");
         this.restoreLiveStateFor(this.session.sessionId);
@@ -743,12 +772,14 @@ export class PulsarAcpAgentView {
         this.appendStderr(event.text);
         break;
       case "error":
+        this.hideLoadingOverlay();
         this.appendError(event.message);
         this.setAgentStatus("error");
         this.stopButton.disabled = true;
         this.updateInputControls();
         break;
       case "exit": {
+        this.hideLoadingOverlay();
         const detail = `exited${event.code != null ? ` (code ${event.code})` : ""}`;
         this.agentExited = true;
         this.currentMode = null;

@@ -152,6 +152,9 @@
 
 .pulsar-acp-agent-conversation {
   flex: 1;
+  // Allow the flex item to shrink below content height so internal
+  // overflow-y scrolling works inside the conversation wrapper.
+  min-height: 0;
   overflow-y: auto;
   // Disable scroll anchoring: late-loading image previews grow above the
   // streaming output, and the browser's anchor adjustment would bump scrollTop
@@ -159,6 +162,47 @@
   overflow-anchor: none;
   padding: @component-padding;
   line-height: 1.5;
+}
+
+.pulsar-acp-agent-conversation-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pulsar-acp-agent-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  // Never intercept clicks/scroll on the conversation building underneath.
+  pointer-events: none;
+  background: @tool-panel-background-color;
+}
+
+.pulsar-acp-agent-loading-label {
+  color: @text-color-subtle;
+  animation: pulsar-acp-agent-loading-pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulsar-acp-agent-loading-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulsar-acp-agent-loading-label {
+    animation: none;
+    opacity: 0.6;
+  }
 }
 
 .pulsar-acp-agent-message {
