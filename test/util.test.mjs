@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 // Imports the built bundle, not src/util.ts: tests run on Pulsar's Node (20.16,
 // per .nvmrc), which can't execute TypeScript. `npm run build` emits lib/util.js.
-import { parseCommandLine, TerminalRecord } from "../lib/util.js";
+import { flattenInfoRows, parseCommandLine, TerminalRecord } from "../lib/util.js";
 
 // ---------------------------------------------------------------------------
 // parseCommandLine
@@ -104,6 +104,36 @@ test("parseCommandLine: does not interpret shell metacharacters", () => {
     ";",
     "id",
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// flattenInfoRows
+// ---------------------------------------------------------------------------
+
+test("flattenInfoRows: flattens nested values and object-presence leaves", () => {
+  assert.deepEqual(
+    flattenInfoRows({
+      loadSession: true,
+      mcpCapabilities: { http: true, sse: true },
+      positionEncoding: "utf-8",
+      promptCapabilities: {
+        image: true,
+        audio: false,
+        embeddedContext: true,
+      },
+      sessionCapabilities: { list: {} },
+    }),
+    [
+      { key: "loadSession", value: "true" },
+      { key: "mcpCapabilities.http", value: "true" },
+      { key: "mcpCapabilities.sse", value: "true" },
+      { key: "positionEncoding", value: "utf-8" },
+      { key: "promptCapabilities.image", value: "true" },
+      { key: "promptCapabilities.audio", value: "false" },
+      { key: "promptCapabilities.embeddedContext", value: "true" },
+      { key: "sessionCapabilities.list", value: "{}" },
+    ],
+  );
 });
 
 // ---------------------------------------------------------------------------

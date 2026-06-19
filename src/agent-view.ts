@@ -3,6 +3,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { AgentEvent, AgentSession } from "./agent-session";
+import { flattenInfoRows } from "./util";
 
 marked.setOptions({ breaks: true });
 
@@ -400,6 +401,29 @@ export class PulsarAcpAgentView {
       }
       this.infoPanel.appendChild(row);
     };
+    const infoTable = (value: unknown): HTMLElement | null => {
+      const rows = flattenInfoRows(value);
+      if (rows.length === 0) return null;
+      const wrap = document.createElement("div");
+      wrap.classList.add("pulsar-acp-agent-info-table");
+      const table = document.createElement("table");
+      const body = document.createElement("tbody");
+      for (const item of rows) {
+        const row = document.createElement("tr");
+        const key = document.createElement("td");
+        key.classList.add("pulsar-acp-agent-info-key");
+        key.textContent = item.key;
+        const val = document.createElement("td");
+        val.classList.add("pulsar-acp-agent-info-table-value");
+        val.textContent = item.value;
+        row.appendChild(key);
+        row.appendChild(val);
+        body.appendChild(row);
+      }
+      table.appendChild(body);
+      wrap.appendChild(table);
+      return wrap;
+    };
 
     // No identity yet (agent exited before initializing): still surface Restart
     // so a failed start is recoverable from the UI.
@@ -424,51 +448,13 @@ export class PulsarAcpAgentView {
     versionContent.appendChild(this.restartButton);
     addRow("Version", versionContent);
 
-    const capsEl = document.createElement("span");
-    capsEl.classList.add("pulsar-acp-agent-info-caps");
-    const pills = this.buildCapabilityPills(caps);
-    if (pills.length === 0) {
-      const none = document.createElement("span");
-      none.classList.add("pulsar-acp-agent-info-value");
-      none.textContent = "none reported";
-      capsEl.appendChild(none);
-    } else {
-      pills.forEach((p) => capsEl.appendChild(p));
-    }
-    addRow("Capabilities", capsEl);
+    addRow("Capabilities", caps ? (infoTable(caps) ?? "none reported") : "none reported");
 
     const meta = info._meta;
     if (meta && Object.keys(meta).length > 0) {
-      const pre = document.createElement("pre");
-      pre.classList.add("pulsar-acp-agent-info-meta");
-      pre.textContent = JSON.stringify(meta, null, 2);
-      addRow("Meta", pre);
+      const table = infoTable(meta);
+      if (table) addRow("Meta", table);
     }
-  }
-
-  private buildCapabilityPills(
-    caps: acp.AgentCapabilities | null,
-  ): HTMLElement[] {
-    const pills: HTMLElement[] = [];
-    const pill = (label: string): HTMLElement => {
-      const el = document.createElement("span");
-      el.classList.add("pulsar-acp-agent-cap-pill");
-      el.textContent = label;
-      return el;
-    };
-    if (!caps) return pills;
-    if (caps.loadSession) pills.push(pill("load-session"));
-    if (caps.promptCapabilities?.image) pills.push(pill("image"));
-    if (caps.promptCapabilities?.audio) pills.push(pill("audio"));
-    if (caps.promptCapabilities?.embeddedContext)
-      pills.push(pill("embedded-context"));
-    if (caps.mcpCapabilities?.http) pills.push(pill("mcp-http"));
-    if (caps.mcpCapabilities?.sse) pills.push(pill("mcp-sse"));
-    if (caps.sessionCapabilities?.delete) pills.push(pill("session-delete"));
-    if (caps.sessionCapabilities?.additionalDirectories)
-      pills.push(pill("additional-dirs"));
-    if (caps.auth?.logout) pills.push(pill("logout"));
-    return pills;
   }
 
   private send(): void {

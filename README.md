@@ -65,9 +65,9 @@ If the agent advertises image prompt support, attach PNG, JPEG, GIF, or WebP
 images up to 5 MiB via the attachment button, drag-and-drop, or paste.
 
 Once connected, the header shows the agent's name. Click the name to open the agent
-details: version, advertised capabilities, any reported metadata, and a Restart
-button. A status row below the header shows the current mode and token usage
-when the agent reports them.
+details: version, advertised capabilities and metadata as key/value rows, and a
+Restart button. A status row below the header shows the current mode and token
+usage when the agent reports them.
 
 When Pulsar's status bar service is available, it shows a tile with the agent
 name when known, otherwise `Agent`, plus a colored state dot (idle, connecting,
@@ -114,14 +114,19 @@ The SDK is ESM-only, so esbuild bundles it and `zod` into `lib/main.js`.
 `npm test` runs Node's built-in runner over `test/*.test.mjs`. Run
 `npm run build` first because tests import the built `lib/util.js`.
 
-## Capabilities
+## Supported ACP features
 
-| Capability | Status |
+| Feature | Status |
 | --- | --- |
 | `fs.readTextFile` / `fs.writeTextFile` | yes, restricted to the session working directory |
 | `session/request_permission` | yes |
 | `terminal` | yes, working directory is restricted to the project |
 | `authenticate` | yes, uses the first auth method advertised by the agent |
+
+Beyond ACP, this package also adds:
+
+| Feature | Status |
+| --- | --- |
 | host context hint | yes, sent once per session by default |
 
 ## Security

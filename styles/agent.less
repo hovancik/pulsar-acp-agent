@@ -117,32 +117,37 @@
   }
 }
 
-.pulsar-acp-agent-info-caps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.pulsar-acp-agent-cap-pill {
-  display: inline-block;
-  padding: 1px 7px;
-  border-radius: 10px;
-  background-color: @background-color-highlight;
-  border: 1px solid fade(@text-color, 8%);
-  color: @text-color-subtle;
-  font-size: 0.85em;
-  white-space: nowrap;
-}
-
-.pulsar-acp-agent-info-meta {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-all;
-  font-family: monospace;
-  font-size: 0.9em;
-  color: @text-color-subtle;
-  max-height: 8em;
+.pulsar-acp-agent-info-table {
+  flex: 1;
+  min-width: 0;
+  max-height: 10em;
   overflow-y: auto;
+  font-size: 0.9em;
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  td {
+    padding: 0 0 2px;
+    vertical-align: top;
+    font-family: monospace;
+  }
+
+  td + td {
+    padding-left: @component-padding;
+  }
+}
+
+.pulsar-acp-agent-info-key {
+  color: @text-color-subtle;
+  word-break: break-word;
+}
+
+.pulsar-acp-agent-info-table-value {
+  color: @text-color;
+  word-break: break-word;
 }
 
 .pulsar-acp-agent-conversation {
