@@ -9,6 +9,8 @@ This package bundles third-party code into `lib/main.js`.
 | `@agentclientprotocol/sdk` | 0.25.0 | Apache-2.0 | https://github.com/agentclientprotocol/typescript-sdk |
 | `zod` | 3.25.76 | MIT | https://github.com/colinhacks/zod |
 | `cross-spawn` | 7.0.6 | MIT | https://github.com/moxystudio/node-cross-spawn |
+| `dompurify` | 3.4.11 | MPL-2.0 OR Apache-2.0 | https://github.com/cure53/DOMPurify |
+| `marked` | 18.0.5 | MIT | https://github.com/markedjs/marked |
 | `which` | 2.0.2 | ISC | https://github.com/isaacs/node-which |
 | `isexe` | 2.0.0 | ISC | https://github.com/isaacs/isexe |
 | `path-key` | 3.1.1 | MIT | https://github.com/sindresorhus/path-key |
@@ -228,6 +230,55 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+## marked
+
+```text
+# License information
+
+## Contribution License Agreement
+
+If you contribute code to this project, you are implicitly allowing your code
+to be distributed under the MIT license. You are also implicitly verifying that
+all code is your original work.
+
+## Marked
+
+Copyright (c) 2018+, MarkedJS (https://github.com/markedjs/)
+Copyright (c) 2011-2018, Christopher Jeffrey (https://github.com/chjj/)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+## dompurify
+
+Dual-licensed under `MPL-2.0 OR Apache-2.0`. The Apache License, Version 2.0
+text is reproduced above under `@agentclientprotocol/sdk`. The Mozilla Public
+License 2.0 standard notice follows.
+
+```text
+Copyright (c) Mario Heiderich and DOMPurify contributors.
+
+This Source Code Form is subject to the terms of the Mozilla Public License,
+v. 2.0. If a copy of the MPL was not distributed with this file, You can
+obtain one at https://mozilla.org/MPL/2.0/.
 ```
 
 ## cross-spawn

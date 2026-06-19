@@ -41,6 +41,13 @@
   "deserializers": {
     "PulsarAcpAgentView": "deserializePulsarAcpAgentView"
   },
+  "consumedServices": {
+    "status-bar": {
+      "versions": {
+        "^1.0.0": "consumeStatusBar"
+      }
+    }
+  },
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
@@ -54,7 +61,9 @@
     "@types/cross-spawn": "^6.0.6",
     "@types/node": "^20.19.0",
     "cross-spawn": "^7.0.6",
+    "dompurify": "^3.4.11",
     "esbuild": "^0.28.0",
+    "marked": "^18.0.5",
     "typescript": "^5.6.3",
     "zod": "^3.25.76"
   },
@@ -65,6 +74,13 @@
       "order": 1,
       "title": "Agent command",
       "description": "Full command line for an executable that speaks ACP over stdio. Examples: `copilot --acp --stdio`, `gemini --experimental-acp`. Wrap a path that contains spaces in double quotes."
+    },
+    "sendHostContext": {
+      "type": "boolean",
+      "default": true,
+      "order": 2,
+      "title": "Send host context",
+      "description": "Tell the agent once per session that it is connected through Pulsar ACP Agent inside Pulsar. This helps agents answer accurately about what they can and cannot do in the editor."
     }
   }
 }

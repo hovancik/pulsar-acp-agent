@@ -33,6 +33,33 @@ export function parseCommandLine(line: string): string[] {
   return tokens;
 }
 
+export type InfoRow = { key: string; value: string };
+
+export function flattenInfoRows(value: unknown): InfoRow[] {
+  const rows: InfoRow[] = [];
+  const visit = (current: unknown, path: string[]): void => {
+    if (current && typeof current === "object" && !Array.isArray(current)) {
+      const entries = Object.entries(current);
+      if (entries.length === 0) {
+        if (path.length > 0) rows.push({ key: path.join("."), value: "{}" });
+        return;
+      }
+      for (const [key, child] of entries) visit(child, path.concat(key));
+      return;
+    }
+    rows.push({ key: path.join(".") || "value", value: formatInfoValue(current) });
+  };
+  visit(value, []);
+  return rows;
+}
+
+function formatInfoValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null || typeof value === "boolean" || typeof value === "number")
+    return String(value);
+  return JSON.stringify(value) ?? String(value);
+}
+
 // Holds a spawned terminal process plus its ring-buffered output. Output is a
 // single merged stdout+stderr buffer truncated from the beginning (oldest
 // dropped) once it exceeds the byte limit, kept at a UTF-8 + line boundary.

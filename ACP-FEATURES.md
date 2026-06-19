@@ -70,10 +70,10 @@ terminal whose output is shown in the panel.
 | `agent_message_chunk` | ✅ | Streamed assistant text. |
 | `agent_thought_chunk` | ✅ | Reasoning, rendered distinctly. |
 | `user_message_chunk` | ✅ | Echoed user content. |
-| `tool_call` / `tool_call_update` | ✅ | Rendered with title, status, and content. |
+| `tool_call` / `tool_call_update` | ✅ | Rendered with title, status, and content. Permission prompts extract command/URL from `rawInput` and include a collapsible raw-input section. |
 | `plan` | ✅ | Execution plan list. |
-| `current_mode_update` | 🟡 | Shown in the status line (display only — see modes below). |
-| `usage_update` | ✅ | Context-token usage shown in the status line. |
+| `current_mode_update` | 🟡 | Shown in the header live row (display only — see modes below). |
+| `usage_update` | ✅ | Context-token usage shown in the header live row. |
 | `available_commands_update` | ⬜ | Slash commands the agent exposes (e.g. `/login`, `/compact`). Not surfaced yet. |
 
 ## Client capabilities (what the agent can ask of us)
@@ -83,18 +83,19 @@ terminal whose output is shown in the panel.
 | `session/request_permission` | ✅ | Allow/Reject prompt rendered in the panel; auto-cancels on restart/exit. |
 | `fs/read_text_file` | ✅ | Served only inside the working directory; prefers unsaved editor-buffer contents. |
 | `fs/write_text_file` | ✅ | Working-dir-scoped; refuses to clobber unsaved changes. |
-| `terminal/*` | ✅ | Implements `terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/release`, and `terminal/kill`. Commands run via `cross-spawn` from the session working directory (an absolute `cwd` outside it is refused), with merged stdout+stderr shown in a `<pre>` and capped by `outputByteLimit`. No per-command approval gate — see [Security](README.md#security). |
+| `terminal/*` | ✅ | Implements `terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/release`, and `terminal/kill`. Commands run via `cross-spawn`, default to the session working directory, and may use an agent-requested absolute `cwd` only inside the project. Merged stdout+stderr is shown in a `<pre>` and capped by `outputByteLimit`. No per-command approval gate — see [Security](README.md#security). |
 
 ## Agent configuration
 
 | ACP feature | Status | Notes |
 | --- | --- | --- |
-| Model display | 🟡 | The current model name (from the session's `models`) is shown in the status line. |
+| Model display | ⬜ | Current model name display is not implemented. |
 | Model selection | ⬜ | Switching models via session config options / a model selector. |
 | Session modes (`session/set_mode`) | ⬜ | We display the current mode but cannot switch it (e.g. ask vs. code). |
 | Session config options | ⬜ | Generic per-session selectors an agent can expose. |
+| Host context hint | ✅ | A configurable first-prompt hint tells the agent it is connected through Pulsar ACP Agent inside Pulsar, plus session `_meta` for protocol-aware agents. |
 | MCP servers | ⬜ | `session/new` is called with an empty `mcpServers` list; we could forward user-configured MCP servers to the agent. |
-| Extensibility (`_meta`) | 🟡 | We read a `terminal-auth` `_meta` hint to build login guidance; `_meta` is the spec's escape hatch for vendor data. |
+| Extensibility (`_meta`) | 🟡 | We read a `terminal-auth` hint to build login guidance and send host-context metadata for protocol-aware agents; `_meta` is the spec's escape hatch for vendor data. |
 
 ## Suggested priorities
 

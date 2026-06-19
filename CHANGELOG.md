@@ -9,15 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a "Scroll to bottom" button that appears when you scroll up in the conversation, and disappears once you reach the bottom.
+- Added a loading placeholder when opening a stored session: the conversation pane shows a pulsing "Loading session…" overlay while history is replayed, and reveals the restored conversation once ready.
 - Added ACP `terminal/*` capability.
-- Added agent info panel: the header shows the connected agent's name, with an info button that reveals its version, advertised capabilities, and metadata.
+- Added agent info panel: click the agent name in the header to reveal its version, advertised capabilities and metadata as key/value rows, and a Restart button.
 - Added image attachment support for PNG, JPEG, GIF, and WebP files up to 5 MiB.
-- Added session list in the sessions bar: browse and switch between past sessions.
+- Added session list in the sessions bar: browse past sessions and switch when the agent supports loading sessions.
 - Added delete button per session entry (shown when the agent advertises `sessionCapabilities.delete`).
+- Agent responses are now rendered as Markdown (GFM), formatted live as the text streams in.
+- Added a configurable host-context hint so agents know they are connected through Pulsar ACP Agent inside Pulsar.
+- Permission prompts now show the command or URL from `rawInput` and a collapsible raw-input section.
+- Added an in-chat activity indicator at the bottom of the conversation while the agent is busy: "Working…", "Awaiting confirmation…" during a permission prompt, and "Stopping…" after Stop is pressed.
+- Tool-call cards now cap their content at about 12 lines by default, with a "Show more"/"Show less" toggle that appears only when the content is taller.
+- Added a status bar tile showing the agent name when known and a state dot: a hollow ring while connecting, solid for ready, working, or error, and the theme's warning color while awaiting your confirmation; click it to reveal the panel.
+
+### Removed
+
+- Removed the configurable working directory setting; new sessions now use the first open project folder.
 
 ### Fixed
 
-- Conversation now reliably auto-scrolls to follow streamed agent output unless you scroll up.
+- Chat text is now selectable and copyable with Ctrl/Cmd+C and right-click Copy.
+- Conversation now reliably auto-scrolls to follow streamed agent output, and stops following when you scroll up.
 - Input textarea now uses theme variables instead of browser defaults.
 
 ## [0.1.0] - 2026-06-15
