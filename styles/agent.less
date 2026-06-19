@@ -7,6 +7,11 @@
   min-width: 240px;
   background-color: @tool-panel-background-color;
   color: @text-color;
+
+  // Focusable for keyboard copy (tabIndex -1); never draw a focus ring.
+  &:focus {
+    outline: none;
+  }
 }
 
 .pulsar-acp-agent-header {
@@ -162,6 +167,10 @@
   overflow-anchor: none;
   padding: @component-padding;
   line-height: 1.5;
+  // Pulsar's workspace chrome sets user-select:none; opt chat text back in.
+  // Mirror the prefixed property core uses so the override wins everywhere.
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .pulsar-acp-agent-conversation-wrapper {

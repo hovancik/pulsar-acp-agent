@@ -18,3 +18,12 @@
     ]
   }
 ]
+
+'context-menu':
+  '.pulsar-acp-agent':
+    [
+      {
+        'label': 'Copy'
+        'command': 'core:copy'
+      }
+    ]

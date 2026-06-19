@@ -169,6 +169,10 @@ export class PulsarAcpAgentView {
   private buildUI(): void {
     this.element = document.createElement("div");
     this.element.classList.add("pulsar-acp-agent");
+    // Focusable so a mouse selection focuses the panel and core:copy dispatches
+    // from inside it (bubbling up to the handler), not from body. Matches
+    // Markdown Preview.
+    this.element.tabIndex = -1;
 
     const header = document.createElement("div");
     header.classList.add("pulsar-acp-agent-header");

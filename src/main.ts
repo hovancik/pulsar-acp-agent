@@ -128,6 +128,24 @@ export function activate(): void {
       "pulsar-acp-agent:focus": () =>
         atom.workspace.open(PULSAR_ACP_AGENT_URI, { searchAllPanes: true }),
     }),
+    atom.commands.add(".pulsar-acp-agent", {
+      // Pulsar only wires copy inside text editors, so chat selections can't be
+      // copied. The platform copy shortcut and the context menu already dispatch
+      // core:copy; handle it here, copying the panel's selection. Fall through
+      // (abortKeyBinding) when the selection is empty or outside the panel so a
+      // focused input still copies natively.
+      "core:copy": (event) => {
+        const selection = window.getSelection();
+        const text = selection?.toString() ?? "";
+        const target = event.currentTarget as HTMLElement;
+        if (text && selection?.anchorNode && target.contains(selection.anchorNode)) {
+          atom.clipboard.write(text);
+          event.stopPropagation();
+        } else {
+          event.abortKeyBinding();
+        }
+      },
+    }),
   );
 }
 

@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Chat text is now selectable and copyable with Ctrl/Cmd+C and right-click Copy.
 - Conversation now reliably auto-scrolls to follow streamed agent output, and stops following when you scroll up.
 - Input textarea now uses theme variables instead of browser defaults.
 
