@@ -70,8 +70,10 @@ Restart button. A status row below the header shows the current mode and token
 usage when the agent reports them.
 
 When Pulsar's status bar service is available, it shows a tile with the agent
-name when known, otherwise `Agent`, plus a colored state dot (idle, connecting,
-ready, working, error). Click the tile to reveal the panel.
+name when known, otherwise `Agent`, plus a state dot: a hollow ring while
+connecting, then solid for ready, working, or error, and the theme's warning
+color while awaiting your confirmation of a permission request. Click the tile
+to reveal the panel.
 
 After connection, a **Sessions** bar appears at the top of the panel. It lists
 past sessions when the agent advertises `sessionCapabilities.list`; switching is

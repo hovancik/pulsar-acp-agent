@@ -14,6 +14,7 @@ export type AgentStatus =
   | "connecting"
   | "ready"
   | "working"
+  | "awaiting"
   | "error";
 
 export interface AgentStatusReporter {
@@ -90,6 +91,7 @@ export class PulsarAcpAgentView {
   private conversation!: HTMLElement;
   private conversationWrapper!: HTMLElement;
   private loadingOverlay!: HTMLElement;
+  private generatingIndicator: HTMLElement | null = null;
   private sendButton!: HTMLButtonElement;
   private stopButton!: HTMLButtonElement;
   private newSessionButton!: HTMLButtonElement;
@@ -300,7 +302,10 @@ export class PulsarAcpAgentView {
     this.attachButton.addEventListener("click", () => this.fileInput.click());
     this.sendButton = this.makeButton("Send", () => this.send());
     this.sendButton.classList.add("pulsar-acp-agent-send");
-    this.stopButton = this.makeButton("Stop", () => this.session.cancel());
+    this.stopButton = this.makeButton("Stop", () => {
+      this.setGeneratingState("stopping");
+      this.session.cancel();
+    });
     this.stopButton.classList.add("pulsar-acp-agent-stop");
     this.stopButton.disabled = true;
     actions.appendChild(this.attachButton);
@@ -605,6 +610,7 @@ export class PulsarAcpAgentView {
     this.clearThumbnails();
     this.endStreamingBlocks();
     this.stickToBottom = true;
+    this.generatingIndicator = null;
   }
 
   private startNewSession(): void {
@@ -692,6 +698,30 @@ export class PulsarAcpAgentView {
     this.loadingOverlay.style.display = "none";
   }
 
+  private setGeneratingState(
+    state: "working" | "awaiting" | "stopping" | null,
+  ): void {
+    if (state === null) {
+      if (this.generatingIndicator) {
+        this.generatingIndicator.remove();
+        this.generatingIndicator = null;
+      }
+      return;
+    }
+    if (!this.generatingIndicator) {
+      this.generatingIndicator = document.createElement("div");
+      this.generatingIndicator.classList.add("pulsar-acp-agent-generating");
+    }
+    const labels: Record<"working" | "awaiting" | "stopping", string> = {
+      working: "Working\u2026",
+      awaiting: "Awaiting confirmation\u2026",
+      stopping: "Stopping\u2026",
+    };
+    this.generatingIndicator.textContent = labels[state];
+    this.conversation.appendChild(this.generatingIndicator);
+    this.scrollToBottom();
+  }
+
   private swapInConversation(el: HTMLElement): void {
     this.conversation.replaceWith(el);
     this.conversation = el;
@@ -740,6 +770,7 @@ export class PulsarAcpAgentView {
       case "turn-start":
         this.setAgentStatus("working");
         this.stopButton.disabled = false;
+        this.setGeneratingState("working");
         this.updateInputControls();
         this.updateSessionControls();
         this.stderrBody = null;
@@ -747,6 +778,7 @@ export class PulsarAcpAgentView {
       case "turn-end":
         this.setAgentStatus("ready");
         this.stopButton.disabled = true;
+        this.setGeneratingState(null);
         this.updateInputControls();
         this.updateSessionControls();
         this.endStreamingBlocks();
@@ -773,6 +805,7 @@ export class PulsarAcpAgentView {
         break;
       case "error":
         this.hideLoadingOverlay();
+        this.setGeneratingState(null);
         this.appendError(event.message);
         this.setAgentStatus("error");
         this.stopButton.disabled = true;
@@ -780,6 +813,7 @@ export class PulsarAcpAgentView {
         break;
       case "exit": {
         this.hideLoadingOverlay();
+        this.setGeneratingState(null);
         const detail = `exited${event.code != null ? ` (code ${event.code})` : ""}`;
         this.agentExited = true;
         this.currentMode = null;
@@ -1093,6 +1127,7 @@ export class PulsarAcpAgentView {
 
   private appendNote(text: string): void {
     this.appendMessage("note", text);
+    this.scrollToBottom();
   }
 
   private appendError(text: string): void {
@@ -1297,6 +1332,9 @@ export class PulsarAcpAgentView {
     const toolCall = params.toolCall;
     const toolTitle = toolCall?.title || "an action";
 
+    this.setGeneratingState("awaiting");
+    this.setAgentStatus("awaiting");
+
     const block = document.createElement("div");
     block.classList.add("pulsar-acp-agent-permission");
     if (toolCall?.kind) block.dataset.kind = toolCall.kind;
@@ -1406,6 +1444,10 @@ export class PulsarAcpAgentView {
           (child as HTMLButtonElement).disabled = true;
         block.dataset.resolved = option.optionId;
         question.replaceChildren(makeLabel(`${option.name} \u2014 ${toolTitle}`));
+        if (this.session.running) {
+          this.setGeneratingState("working");
+          this.setAgentStatus("working");
+        }
       });
       button.dataset.optionKind = option.kind;
       if (option.kind === "reject_once" || option.kind === "reject_always")
@@ -1655,6 +1697,12 @@ export class PulsarAcpAgentView {
   }
 
   private scrollToBottom(): void {
+    if (
+      this.generatingIndicator &&
+      this.conversation.lastElementChild !== this.generatingIndicator
+    ) {
+      this.conversation.appendChild(this.generatingIndicator);
+    }
     if (!this.stickToBottom) return;
     this.conversation.scrollTop = this.conversation.scrollHeight;
   }

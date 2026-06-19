@@ -198,8 +198,15 @@
   }
 }
 
+.pulsar-acp-agent-generating {
+  color: @text-color-subtle;
+  padding: (@component-padding / 2) 0;
+  animation: pulsar-acp-agent-loading-pulse 2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .pulsar-acp-agent-loading-label {
+  .pulsar-acp-agent-loading-label,
+  .pulsar-acp-agent-generating {
     animation: none;
     opacity: 0.6;
   }
@@ -658,13 +665,15 @@
   }
 
   .pulsar-acp-agent-status-tile-dot {
+    box-sizing: border-box;
     width: 8px;
     height: 8px;
     border-radius: 50%;
     background-color: @text-color-subtle;
 
     &[data-status="connecting"] {
-      background-color: @text-color-warning;
+      background-color: transparent;
+      border: 2px solid @text-color-success;
     }
 
     &[data-status="ready"] {
@@ -673,6 +682,10 @@
 
     &[data-status="working"] {
       background-color: @text-color-info;
+    }
+
+    &[data-status="awaiting"] {
+      background-color: @text-color-warning;
     }
 
     &[data-status="error"] {

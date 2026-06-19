@@ -12,6 +12,7 @@ const STATUS_LABELS: Record<AgentStatus, string> = {
   connecting: "Connecting\u2026",
   ready: "Ready",
   working: "Working\u2026",
+  awaiting: "Awaiting confirmation\u2026",
   error: "Error",
 };
 
