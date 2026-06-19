@@ -330,7 +330,7 @@ export class PulsarAcpAgentView {
     controls.classList.add("pulsar-acp-agent-sessions-controls");
 
     this.sessionsToggle = document.createElement("button");
-    this.sessionsToggle.classList.add("pulsar-acp-agent-sessions-toggle", "btn");
+    this.sessionsToggle.classList.add("pulsar-acp-agent-sessions-toggle");
     this.sessionsToggle.textContent = "\u25b8 Sessions";
     this.sessionsToggle.addEventListener("click", () => {
       this.sessionsListVisible = !this.sessionsListVisible;

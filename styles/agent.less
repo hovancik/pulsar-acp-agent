@@ -487,6 +487,9 @@
 }
 
 .pulsar-acp-agent-sessions-bar {
+  position: relative;
+  // Raise above the conversation so the floating list overlays it.
+  z-index: 10;
   border-bottom: 1px solid @pane-item-border-color;
   font-size: 0.9em;
 }
@@ -514,6 +517,15 @@
     &:hover {
       color: @text-color;
     }
+
+    &:focus {
+      outline: none;
+    }
+
+    &:focus-visible {
+      outline: 1px solid @text-color-info;
+      outline-offset: 2px;
+    }
   }
 
   .pulsar-acp-agent-new-session {
@@ -524,8 +536,20 @@
 }
 
 .pulsar-acp-agent-sessions-list {
-  max-height: calc(10 * 2.4em + @component-padding);
+  // Overlay: float below the controls, over the conversation, instead of
+  // pushing it down. The sessions-bar bottom border becomes the separator
+  // between the SESSIONS header and the dropped list.
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  max-height: 20vh;
   overflow-y: auto;
+  background-color: @overlay-background-color;
+  // Frame the floating list with the theme's overlay border; the sessions-bar
+  // bottom border forms the top edge / separator from the SESSIONS header.
+  border: 1px solid @overlay-border-color;
+  border-top: none;
   padding: (@component-padding / 4) (@component-padding / 2)
     (@component-padding / 2);
 }
