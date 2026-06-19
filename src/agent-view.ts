@@ -8,6 +8,22 @@ marked.setOptions({ breaks: true });
 
 export const PULSAR_ACP_AGENT_URI = "atom://pulsar-acp-agent";
 
+export type AgentStatus =
+  | "idle"
+  | "connecting"
+  | "ready"
+  | "working"
+  | "error";
+
+export interface AgentStatusReporter {
+  report(
+    view: PulsarAcpAgentView,
+    status: AgentStatus,
+    name: string | null,
+  ): void;
+  clear(view: PulsarAcpAgentView): void;
+}
+
 type DockLocation = "left" | "right" | "bottom";
 
 type ToolUpdate = Extract<
@@ -65,7 +81,6 @@ export class PulsarAcpAgentView {
   private currentMode: string | null = null;
   private currentTokens: string | null = null;
   private lifecycleStatus = "";
-  private agentBusy = false;
   private agentExited = false;
   private input!: HTMLTextAreaElement;
   private fileInput!: HTMLInputElement;
@@ -77,6 +92,8 @@ export class PulsarAcpAgentView {
   private newSessionButton!: HTMLButtonElement;
   private sessionsBar!: HTMLElement;
   private sessionsList!: HTMLElement;
+  private sessionTooltips = new CompositeDisposable();
+  private thumbnailTooltips = new CompositeDisposable();
   private sessionsToggle!: HTMLButtonElement;
   private sessionsListVisible = false;
   private knownSessions: acp.SessionInfo[] = [];
@@ -94,8 +111,10 @@ export class PulsarAcpAgentView {
   private imageSupportKnown = false;
   private supportsImages = false;
   private startObserver: IntersectionObserver | null = null;
+  private reporter: AgentStatusReporter | null;
 
-  constructor() {
+  constructor(reporter: AgentStatusReporter | null = null) {
+    this.reporter = reporter;
     this.subscriptions = new CompositeDisposable();
     this.session = new AgentSession();
 
@@ -105,6 +124,7 @@ export class PulsarAcpAgentView {
     );
     this.subscriptions.add(this.eventSubscription);
     this.setLifecycleStatus("Idle \u2014 type a message to start the agent.");
+    this.setAgentStatus("idle");
 
     // Start the agent only once the panel is actually shown. A dock restored
     // collapsed at editor startup should not spawn the agent until the user
@@ -150,9 +170,19 @@ export class PulsarAcpAgentView {
     this.agentNameEl = document.createElement("button");
     this.agentNameEl.classList.add("pulsar-acp-agent-name");
     this.agentNameEl.addEventListener("click", () => this.toggleInfoPanel());
+    this.subscriptions.add(
+      atom.tooltips.add(this.agentNameEl, {
+        title: () =>
+          this.storedAgentInfo != null || this.agentExited
+            ? "Agent details"
+            : "",
+      }),
+    );
     this.restartButton = this.makeButton("Restart", () => this.restart());
     this.restartButton.classList.add("pulsar-acp-agent-restart");
-    this.restartButton.title = "Restart agent";
+    this.subscriptions.add(
+      atom.tooltips.add(this.restartButton, { title: "Restart agent" }),
+    );
     row1.appendChild(this.agentNameEl);
 
     this.liveStatusEl = document.createElement("div");
@@ -246,7 +276,11 @@ export class PulsarAcpAgentView {
       "icon-file-media",
       "pulsar-acp-agent-attach",
     );
-    this.attachButton.title = "Attach image (or drag-and-drop / paste)";
+    this.subscriptions.add(
+      atom.tooltips.add(this.attachButton, {
+        title: "Attach image (or drag-and-drop / paste)",
+      }),
+    );
     this.attachButton.addEventListener("click", () => this.fileInput.click());
     this.sendButton = this.makeButton("Send", () => this.send());
     this.sendButton.classList.add("pulsar-acp-agent-send");
@@ -329,19 +363,12 @@ export class PulsarAcpAgentView {
     );
   }
 
-  // Identity plus transient lifecycle/turn activity, shown as a plain
-  // disclosure. Mode and token usage live in the separate live row.
+  // Identity disclosure. Lifecycle and turn state live in the status bar tile;
+  // mode and token usage live in the separate live row.
   private renderPill(): void {
     const info = this.storedAgentInfo;
     const name = info ? info.title || info.name : null;
-    const activity = this.agentBusy ? "working\u2026" : this.lifecycleStatus;
-    if (name) {
-      this.agentNameEl.textContent = activity
-        ? `${name} \u00b7 ${activity}`
-        : name;
-    } else {
-      this.agentNameEl.textContent = activity || "Starting\u2026";
-    }
+    this.agentNameEl.textContent = name || "Starting\u2026";
     this.agentNameEl.style.display = "";
     const hasPanel = info != null || this.agentExited;
     this.agentNameEl.disabled = !hasPanel;
@@ -349,7 +376,6 @@ export class PulsarAcpAgentView {
       "pulsar-acp-agent-name--toggle",
       hasPanel,
     );
-    this.agentNameEl.title = hasPanel ? "Agent details" : "";
   }
 
   private renderInfoPanel(): void {
@@ -477,10 +503,12 @@ export class PulsarAcpAgentView {
           return;
         }
       } catch (error) {
-        if (this.session === currentSession)
+        if (this.session === currentSession) {
           this.appendError(
             error instanceof Error ? error.message : String(error),
           );
+          this.setAgentStatus("error");
+        }
         return;
       } finally {
         if (this.session === currentSession) {
@@ -499,6 +527,7 @@ export class PulsarAcpAgentView {
     this.session.prompt(text, images).catch((error) => {
       if (this.session !== currentSession) return;
       this.appendError(error.message || String(error));
+      this.setAgentStatus("error");
       this.stopButton.disabled = true;
       this.updateInputControls();
     });
@@ -519,6 +548,7 @@ export class PulsarAcpAgentView {
     this.resetAgentChrome();
     this.resetSessionsChrome();
     this.setLifecycleStatus("Idle \u2014 type a message to start the agent.");
+    this.setAgentStatus("idle");
     this.renderLiveRow();
     this.stopButton.disabled = true;
     this.updateInputControls();
@@ -529,6 +559,8 @@ export class PulsarAcpAgentView {
   }
 
   private resetSessionsChrome(): void {
+    this.sessionTooltips.dispose();
+    this.sessionTooltips = new CompositeDisposable();
     this.sessionsBar.style.display = "none";
     this.sessionsList.innerHTML = "";
     this.sessionsList.style.display = "none";
@@ -544,7 +576,6 @@ export class PulsarAcpAgentView {
     this.storedCapabilities = null;
     this.currentMode = null;
     this.currentTokens = null;
-    this.agentBusy = false;
     this.agentExited = false;
     this.renderLiveRow();
     this.renderPill();
@@ -622,6 +653,7 @@ export class PulsarAcpAgentView {
     this.currentMode = null;
     this.currentTokens = null;
     this.setLifecycleStatus("Loading session\u2026");
+    this.setAgentStatus("connecting");
     this.updateSessionControls();
     this.session.loadSession(id, info?.cwd).catch((error) => {
       // Roll back to the previous session's conversation on failure.
@@ -630,6 +662,7 @@ export class PulsarAcpAgentView {
         if (prev) this.swapInConversation(prev);
       }
       this.setLifecycleStatus("");
+      this.setAgentStatus("ready");
       this.appendError(error instanceof Error ? error.message : String(error));
       this.updateInputControls();
       this.updateSessionControls();
@@ -656,12 +689,14 @@ export class PulsarAcpAgentView {
     switch (event.type) {
       case "status":
         this.setLifecycleStatus(event.text);
+        this.setAgentStatus("connecting");
         break;
       case "initialized":
         this.storedAgentInfo = event.info;
         this.storedCapabilities = event.capabilities;
         if (event.info && this.infoPanelOpen) this.renderInfoPanel();
         this.setLifecycleStatus("Connected");
+        this.setAgentStatus("connecting");
         this.imageSupportKnown = true;
         this.supportsImages = event.supportsImages;
         this.attachButton.style.display = event.supportsImages ? "" : "none";
@@ -669,8 +704,8 @@ export class PulsarAcpAgentView {
         break;
       case "ready":
         this.lifecycleStatus = "";
-        this.agentBusy = false;
         this.renderPill();
+        this.setAgentStatus("ready");
         this.restoreLiveStateFor(this.session.sessionId);
         if (event.source === "new") {
           this.clearConversation();
@@ -688,16 +723,14 @@ export class PulsarAcpAgentView {
         this.renderSessionsList(event.sessions);
         break;
       case "turn-start":
-        this.agentBusy = true;
-        this.renderPill();
+        this.setAgentStatus("working");
         this.stopButton.disabled = false;
         this.updateInputControls();
         this.updateSessionControls();
         this.stderrBody = null;
         break;
       case "turn-end":
-        this.agentBusy = false;
-        this.renderPill();
+        this.setAgentStatus("ready");
         this.stopButton.disabled = true;
         this.updateInputControls();
         this.updateSessionControls();
@@ -725,17 +758,18 @@ export class PulsarAcpAgentView {
         break;
       case "error":
         this.appendError(event.message);
+        this.setAgentStatus("error");
         this.stopButton.disabled = true;
         this.updateInputControls();
         break;
       case "exit": {
         const detail = `exited${event.code != null ? ` (code ${event.code})` : ""}`;
         this.agentExited = true;
-        this.agentBusy = false;
         this.currentMode = null;
         this.currentTokens = null;
         this.renderLiveRow();
         this.setLifecycleStatus(`Agent ${detail}.`);
+        this.setAgentStatus("error");
         // Auto-open details so Restart stays reachable even if the agent died
         // before reporting any identity (e.g. a bad agent command).
         this.infoPanelOpen = true;
@@ -958,8 +992,10 @@ export class PulsarAcpAgentView {
     const remove = document.createElement("button");
     remove.classList.add("pulsar-acp-agent-thumbnail-remove");
     remove.textContent = "\u00d7";
-    remove.title = "Remove image";
+    const tip = atom.tooltips.add(remove, { title: "Remove image" });
+    this.thumbnailTooltips.add(tip);
     remove.addEventListener("click", () => {
+      tip.dispose();
       const idx = this.pendingImages.findIndex((i) => i.id === image.id);
       if (idx >= 0) this.pendingImages.splice(idx, 1);
       wrapper.remove();
@@ -973,6 +1009,8 @@ export class PulsarAcpAgentView {
   }
 
   private clearThumbnails(): void {
+    this.thumbnailTooltips.dispose();
+    this.thumbnailTooltips = new CompositeDisposable();
     this.thumbnailStrip.innerHTML = "";
     this.thumbnailStrip.style.display = "none";
   }
@@ -1367,6 +1405,8 @@ export class PulsarAcpAgentView {
 
   private renderSessionsList(sessions: acp.SessionInfo[]): void {
     this.knownSessions = sessions;
+    this.sessionTooltips.dispose();
+    this.sessionTooltips = new CompositeDisposable();
     this.sessionsList.innerHTML = "";
     const canDelete = this.session.canDeleteSession();
     for (const info of sessions) {
@@ -1388,7 +1428,13 @@ export class PulsarAcpAgentView {
       const titleEl = document.createElement("span");
       titleEl.classList.add("pulsar-acp-agent-session-title");
       titleEl.textContent = info.title || info.sessionId;
-      titleEl.title = info.title || info.sessionId;
+      this.sessionTooltips.add(
+        atom.tooltips.add(titleEl, {
+          title: info.title || info.sessionId,
+          html: false,
+          class: "pulsar-acp-agent-tooltip",
+        }),
+      );
 
       const timeEl = document.createElement("span");
       timeEl.classList.add("pulsar-acp-agent-session-time");
@@ -1405,7 +1451,9 @@ export class PulsarAcpAgentView {
       if (canDelete) {
         const del = document.createElement("button");
         del.classList.add("pulsar-acp-agent-session-delete", "btn");
-        del.title = "Delete session";
+        this.sessionTooltips.add(
+          atom.tooltips.add(del, { title: "Delete session" }),
+        );
         del.textContent = "\u00d7";
         del.disabled = this.session.running || this.session.switching;
         del.addEventListener("click", () => this.deleteSession(info.sessionId));
@@ -1507,6 +1555,15 @@ export class PulsarAcpAgentView {
   private setLifecycleStatus(text: string): void {
     this.lifecycleStatus = text;
     this.renderPill();
+  }
+
+  private setAgentStatus(status: AgentStatus): void {
+    this.reporter?.report(this, status, this.currentAgentName());
+  }
+
+  private currentAgentName(): string | null {
+    const info = this.storedAgentInfo;
+    return info ? info.title || info.name : null;
   }
 
   private renderLiveRow(): void {
@@ -1619,6 +1676,9 @@ export class PulsarAcpAgentView {
 
   destroy(): void {
     this.disconnectStartObserver();
+    this.reporter?.clear(this);
+    this.sessionTooltips.dispose();
+    this.thumbnailTooltips.dispose();
     this.subscriptions.dispose();
     this.session.dispose();
     if (this.element) this.element.remove();

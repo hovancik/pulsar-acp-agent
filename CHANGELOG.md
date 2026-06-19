@@ -10,21 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added ACP `terminal/*` capability.
-- Added agent info panel: click the agent name pill in the header to reveal its version, advertised capabilities, and metadata.
+- Added agent info panel: click the agent name in the header to reveal its version, advertised capabilities, metadata, and a Restart button.
 - Added image attachment support for PNG, JPEG, GIF, and WebP files up to 5 MiB.
-- Added session list in the sessions bar: browse and switch between past sessions.
+- Added session list in the sessions bar: browse past sessions and switch when the agent supports loading sessions.
 - Added delete button per session entry (shown when the agent advertises `sessionCapabilities.delete`).
 - Agent responses are now rendered as Markdown (GFM). Text streams as plain text during generation and is formatted once the message is complete.
 - Added a configurable host-context hint so agents know they are connected through Pulsar ACP Agent inside Pulsar.
-- Tool-call cards now show the command or URL from `rawInput` and a collapsible raw-input section.
+- Permission prompts now show the command or URL from `rawInput` and a collapsible raw-input section.
+- Added a status bar tile showing the agent name when known and a colored state dot (idle, connecting, ready, working, error); click it to reveal the panel.
 
-### Changed
+### Removed
 
-- Redesigned the header and sessions list. The agent name is now a clickable disclosure that opens the agent details panel (version, capabilities, metadata, and Restart) and shows live activity (connecting, working); the live status row shows mode and token usage only and collapses when empty. "+ New" session is now the primary action.
+- Removed the configurable working directory setting; new sessions now use the first open project folder.
 
 ### Fixed
 
-- Conversation now reliably auto-scrolls to follow streamed agent output unless you scroll up, including after a late-loading image preview grows.
+- Conversation now reliably auto-scrolls to follow streamed agent output, and stops following when you scroll up.
 - Input textarea now uses theme variables instead of browser defaults.
 
 ## [0.1.0] - 2026-06-15

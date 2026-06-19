@@ -567,3 +567,52 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+.pulsar-acp-agent-status-tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+
+  .icon::before {
+    margin-right: 0;
+  }
+
+  .pulsar-acp-agent-status-tile-name {
+    max-width: 14em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pulsar-acp-agent-status-tile-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: @text-color-subtle;
+
+    &[data-status="connecting"] {
+      background-color: @text-color-warning;
+    }
+
+    &[data-status="ready"] {
+      background-color: @text-color-success;
+    }
+
+    &[data-status="working"] {
+      background-color: @text-color-info;
+    }
+
+    &[data-status="error"] {
+      background-color: @text-color-error;
+    }
+  }
+}
+
+// Tooltips render under <body>, so this selector must stay top-level. The
+// one-dark/one-light themes force `white-space: nowrap; max-width: none` on
+// .tooltip-inner, so both must be overridden for long titles to wrap.
+.tooltip.pulsar-acp-agent-tooltip .tooltip-inner {
+  white-space: normal;
+  max-width: 300px;
+  word-break: break-word;
+}

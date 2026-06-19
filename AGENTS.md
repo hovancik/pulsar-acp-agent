@@ -78,6 +78,9 @@ When reviewing changes, explicitly check:
   - `README.md` — feature descriptions, config options, usage instructions
   - `THIRD-PARTY-NOTICES.md` — new bundled dependency added
   - `AGENTS.md` — contributor or agent guidance affected by the change
+- **When the task is done, run a critical review of the uncommitted changes**
+  (`git diff` / `git status`) against the review checklist above before reporting
+  back. Verify each finding against the code; report real issues, not noise.
 - **Never commit unless explicitly asked.** Make code changes, run checks, and
   report back — but do not run `git commit` (or `git push`) without an explicit
   instruction from the developer.

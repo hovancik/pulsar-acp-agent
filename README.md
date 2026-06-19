@@ -17,7 +17,7 @@ ppm install pulsar-acp-agent
 
 Package page: <https://web.pulsar-edit.dev/packages/pulsar-acp-agent>
 
-## Configure Copilot CLI
+## Example configuration with Copilot CLI
 
 Install Copilot CLI and authenticate once:
 
@@ -64,20 +64,25 @@ included in prompts.
 If the agent advertises image prompt support, attach PNG, JPEG, GIF, or WebP
 images up to 5 MiB via the attachment button, drag-and-drop, or paste.
 
-Once connected, the header shows the agent's name. Click it to open the agent
+Once connected, the header shows the agent's name. Click the name to open the agent
 details: version, advertised capabilities, any reported metadata, and a Restart
-button. The name also shows live activity (connecting, working), and a status
-row below the header shows the current mode and token usage when the agent
-reports them.
+button. A status row below the header shows the current mode and token usage
+when the agent reports them.
 
-If the agent advertises `session/list` support, a **Sessions** bar appears at
-the top of the panel. Click it to expand the list of past sessions and switch
-between them. If the agent also advertises `session/delete`, a `×` button
-appears on hover to permanently remove a session.
+When Pulsar's status bar service is available, it shows a tile with the agent
+name when known, otherwise `Agent`, plus a colored state dot (idle, connecting,
+ready, working, error). Click the tile to reveal the panel.
 
-The session working directory is always the first open project folder.
+After connection, a **Sessions** bar appears at the top of the panel. It lists
+past sessions when the agent advertises `sessionCapabilities.list`; switching is
+enabled when the agent also advertises `loadSession`. If the agent advertises
+`sessionCapabilities.delete`, a `×` button appears on hover to permanently
+remove a session.
+
+New sessions use the first open project folder as their working directory.
 Multi-root workspaces are not supported yet: only the first open project folder
-is sent to the agent and allowed for file access.
+is sent to the agent and allowed for file access. Loaded sessions keep their
+recorded working directory when it is still inside that project.
 
 ## Develop
 
@@ -95,7 +100,8 @@ Pulsar loads `lib/main.js`. Rebuild after editing `src/`, then reload Pulsar.
 
 ## Architecture
 
-- `src/main.ts` registers commands, opener, and dock item.
+- `src/main.ts` registers commands, opener, dock item, deserializer, and
+  status-bar service consumer.
 - `src/agent-view.ts` renders the panel UI.
 - `src/agent-session.ts` manages the ACP session via `@agentclientprotocol/sdk`.
 - `src/util.ts` holds pure helpers (`parseCommandLine`, `TerminalRecord`) split
@@ -114,7 +120,7 @@ The SDK is ESM-only, so esbuild bundles it and `zod` into `lib/main.js`.
 | --- | --- |
 | `fs.readTextFile` / `fs.writeTextFile` | yes, restricted to the session working directory |
 | `session/request_permission` | yes |
-| `terminal` | yes, commands run from the session working directory |
+| `terminal` | yes, working directory is restricted to the project |
 | `authenticate` | yes, uses the first auth method advertised by the agent |
 | host context hint | yes, sent once per session by default |
 
@@ -132,11 +138,13 @@ over ACP. They do not restrict what the agent does in its own process:
   there without a per-action prompt.
 - Writes to open files with unsaved changes are refused.
 - The ACP `terminal` capability is accepted: the agent can run commands *through*
-  Pulsar, with their merged output shown in the panel. Commands launch from the
-  session working directory (an absolute `cwd` outside it is refused) and run as
-  separate processes with your user account. There is **no per-command approval
-  prompt** and no sandbox — a launched command can do anything your account can.
-  Terminals are killed when you Stop a turn, restart, or close the panel.
+  Pulsar, with their merged output shown in the panel. Commands default to the
+  session working directory; an agent-requested absolute `cwd` is allowed only
+  inside the project. Commands run as separate processes with your user account.
+  There is **no per-command approval prompt** and no sandbox — a launched command
+  can do anything your account can. Stop requests turn cancellation; terminals
+  are killed when the agent releases/kills them, when you switch or restart
+  sessions, or when you close the panel.
 
 These are guard rails for a cooperating agent, not a security boundary: a
 malicious agent can read or write any file your account can, or run any command,
