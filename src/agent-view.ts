@@ -38,6 +38,8 @@ type ToolView = {
   title: HTMLElement;
   status: HTMLElement;
   body: HTMLElement;
+  toggle: HTMLButtonElement;
+  expanded: boolean;
 };
 
 type PendingImage = { id: number; data: string; mimeType: string; file: File };
@@ -174,6 +176,7 @@ export class PulsarAcpAgentView {
     row1.classList.add("pulsar-acp-agent-header-row1");
     this.agentNameEl = document.createElement("button");
     this.agentNameEl.classList.add("pulsar-acp-agent-name");
+    this.agentNameEl.setAttribute("aria-expanded", "false");
     this.agentNameEl.addEventListener("click", () => this.toggleInfoPanel());
     this.subscriptions.add(
       atom.tooltips.add(this.agentNameEl, {
@@ -294,6 +297,7 @@ export class PulsarAcpAgentView {
       "icon-file-media",
       "pulsar-acp-agent-attach",
     );
+    this.attachButton.setAttribute("aria-label", "Attach image");
     this.subscriptions.add(
       atom.tooltips.add(this.attachButton, {
         title: "Attach image (or drag-and-drop / paste)",
@@ -337,9 +341,14 @@ export class PulsarAcpAgentView {
     this.sessionsToggle = document.createElement("button");
     this.sessionsToggle.classList.add("pulsar-acp-agent-sessions-toggle");
     this.sessionsToggle.textContent = "\u25b8 Sessions";
+    this.sessionsToggle.setAttribute("aria-expanded", "false");
     this.sessionsToggle.addEventListener("click", () => {
       this.sessionsListVisible = !this.sessionsListVisible;
       this.sessionsList.style.display = this.sessionsListVisible ? "" : "none";
+      this.sessionsToggle.setAttribute(
+        "aria-expanded",
+        String(this.sessionsListVisible),
+      );
       this.sessionsToggle.textContent = `${this.sessionsListVisible ? "\u25be" : "\u25b8"} Sessions`;
     });
 
@@ -384,6 +393,7 @@ export class PulsarAcpAgentView {
       "pulsar-acp-agent-name--active",
       this.infoPanelOpen,
     );
+    this.agentNameEl.setAttribute("aria-expanded", String(this.infoPanelOpen));
   }
 
   // Identity disclosure. Lifecycle and turn state live in the status bar tile;
@@ -1043,6 +1053,7 @@ export class PulsarAcpAgentView {
     const remove = document.createElement("button");
     remove.classList.add("pulsar-acp-agent-thumbnail-remove");
     remove.textContent = "\u00d7";
+    remove.setAttribute("aria-label", "Remove image");
     const tip = atom.tooltips.add(remove, { title: "Remove image" });
     this.thumbnailTooltips.add(tip);
     remove.addEventListener("click", () => {
@@ -1160,17 +1171,27 @@ export class PulsarAcpAgentView {
       element.classList.add("pulsar-acp-agent-tool");
       const heading = document.createElement("div");
       heading.classList.add("pulsar-acp-agent-tool-heading");
-      const title = document.createElement("span");
-      title.classList.add("pulsar-acp-agent-tool-title");
       const status = document.createElement("span");
       status.classList.add("pulsar-acp-agent-tool-status");
+      const title = document.createElement("span");
+      title.classList.add("pulsar-acp-agent-tool-title");
       heading.appendChild(status);
       heading.appendChild(title);
       const body = document.createElement("div");
       body.classList.add("pulsar-acp-agent-tool-body");
+      const toggle = document.createElement("button");
+      toggle.classList.add("pulsar-acp-agent-tool-toggle");
+      toggle.style.display = "none";
+      toggle.setAttribute("aria-expanded", "false");
       element.appendChild(heading);
       element.appendChild(body);
-      tool = { element, title, status, body };
+      element.appendChild(toggle);
+      tool = { element, title, status, body, toggle, expanded: false };
+      const view = tool;
+      toggle.addEventListener("click", () => {
+        view.expanded = !view.expanded;
+        this.applyToolExpansion(view);
+      });
       this.toolViews.set(update.toolCallId, tool);
       this.conversation.appendChild(element);
       this.endStreamingBlocks();
@@ -1193,8 +1214,29 @@ export class PulsarAcpAgentView {
       for (const item of update.content) {
         tool.body.appendChild(this.renderToolContent(item));
       }
+      this.updateToolOverflow(tool);
     }
     this.scrollToBottom();
+  }
+
+  private applyToolExpansion(tool: ToolView): void {
+    tool.body.classList.toggle(
+      "pulsar-acp-agent-tool-body--expanded",
+      tool.expanded,
+    );
+    tool.toggle.textContent = tool.expanded ? "Show less" : "Show more";
+    tool.toggle.setAttribute("aria-expanded", String(tool.expanded));
+    this.updateToolOverflow(tool);
+    this.scrollToBottom();
+  }
+
+  private updateToolOverflow(tool: ToolView): void {
+    // While expanded the cap is lifted, so keep the toggle visible to collapse.
+    // While collapsed, only offer it when the body actually overflows the cap.
+    const overflowing =
+      tool.expanded || tool.body.scrollHeight > tool.body.clientHeight + 1;
+    tool.toggle.style.display = overflowing ? "" : "none";
+    if (!tool.expanded) tool.toggle.textContent = "Show more";
   }
 
   private renderToolContent(item: acp.ToolCallContent): HTMLElement {
@@ -1223,6 +1265,11 @@ export class PulsarAcpAgentView {
     if (elements.length === 0) return;
     for (const element of elements) {
       element.textContent = output;
+    }
+    for (const tool of this.toolViews.values()) {
+      if (elements.some((el) => tool.body.contains(el))) {
+        this.updateToolOverflow(tool);
+      }
     }
     this.scrollToBottom();
   }
@@ -1510,6 +1557,7 @@ export class PulsarAcpAgentView {
       if (canDelete) {
         const del = document.createElement("button");
         del.classList.add("pulsar-acp-agent-session-delete", "btn");
+        del.setAttribute("aria-label", "Delete session");
         this.sessionTooltips.add(
           atom.tooltips.add(del, { title: "Delete session" }),
         );

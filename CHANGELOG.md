@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a configurable host-context hint so agents know they are connected through Pulsar ACP Agent inside Pulsar.
 - Permission prompts now show the command or URL from `rawInput` and a collapsible raw-input section.
 - Added an in-chat activity indicator at the bottom of the conversation while the agent is busy: "Working…", "Awaiting confirmation…" during a permission prompt, and "Stopping…" after Stop is pressed.
+- Tool-call cards now cap their content at about 12 lines by default, with a "Show more"/"Show less" toggle that appears only when the content is taller.
 - Added a status bar tile showing the agent name when known and a state dot: a hollow ring while connecting, solid for ready, working, or error, and the theme's warning color while awaiting your confirmation; click it to reveal the panel.
 
 ### Removed

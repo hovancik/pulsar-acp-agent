@@ -281,7 +281,30 @@
     word-break: break-word;
     font-family: monospace;
     font-size: 0.9em;
+    line-height: 1.5;
     color: @text-color-subtle;
+    // ponytail: ~12 lines (1.5 line-height); fixed em cap, no per-line measuring.
+    max-height: 18em;
+    overflow: hidden;
+  }
+
+  .pulsar-acp-agent-tool-body--expanded {
+    max-height: none;
+  }
+
+  .pulsar-acp-agent-tool-toggle {
+    margin-top: 4px;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.9em;
+    color: @text-color-info;
+
+    &:hover {
+      text-decoration: underline;
+    }
   }
 }
 
