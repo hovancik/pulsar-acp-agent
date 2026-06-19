@@ -2,6 +2,26 @@
 
 Guidance for AI agents and contributors working on this package.
 
+## Architecture
+
+Three `src/` modules, bundled to `lib/` by `build.mjs` (esbuild):
+
+- `main.ts` — Pulsar entry point: `activate`/`deactivate`, the
+  `pulsar-acp-agent:toggle`/`focus` commands, the workspace opener for
+  `atom://pulsar-acp-agent`, the `deserializePulsarAcpAgentView` deserializer,
+  and the status-bar `StatusIndicator`. No agent logic.
+- `agent-session.ts` — ACP transport. Spawns the agent with `cross-spawn`,
+  speaks JSON-RPC over stdio, implements the ACP client side (file/terminal/
+  permission capabilities), and emits a discriminated `AgentEvent` union. No DOM.
+- `agent-view.ts` — the dock panel UI (`PulsarAcpAgentView`). Consumes
+  `AgentEvent`s, renders markdown via `marked` + `DOMPurify`, handles
+  prompts/images/sessions/tool calls.
+- `util.ts` — pure helpers (`parseCommandLine`, `flattenInfoRows`,
+  `TerminalRecord`), bundled separately so it's unit-testable without `atom`.
+
+Flow: `main` opens a `PulsarAcpAgentView` → view owns an `AgentSession` → session
+drives the agent process and emits events → view renders them.
+
 ## Principles
 
 - **Discuss before coding.** Never start writing code before discussing the
@@ -69,6 +89,11 @@ When reviewing changes, explicitly check:
 
 - Edit `src/`, then rebuild: `npm run build` (or `npm run watch`).
 - Keep the build green: `npm run typecheck` must pass.
+- `npm test` runs `node --test` over `test/*.mjs`. Tests import the built
+  `lib/util.js`, not `src/`, so build first. Single test:
+  `node --test test/util.test.mjs` (add `--test-name-pattern="..."` to narrow).
+- `npm run smoke -- <command...>` does a live ACP handshake against a real agent
+  (`scripts/smoke.mjs`); defaults to `copilot --acp --stdio`.
 - The committed bundle `lib/main.js` must match the build (CI enforces this).
 - When feasible, manually verify UI changes by reloading Pulsar
   (`Window: Reload`) and opening the ACP panel.
