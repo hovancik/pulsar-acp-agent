@@ -98,6 +98,8 @@ export class PulsarAcpAgentView {
   private generatingIndicator: HTMLElement | null = null;
   private sendButton!: HTMLButtonElement;
   private stopButton!: HTMLButtonElement;
+  private autoApproveButton!: HTMLButtonElement;
+  private autoApprovePermissions = false;
   private newSessionButton!: HTMLButtonElement;
   private sessionsBar!: HTMLElement;
   private sessionsList!: HTMLElement;
@@ -318,7 +320,24 @@ export class PulsarAcpAgentView {
     });
     this.stopButton.classList.add("pulsar-acp-agent-stop");
     this.stopButton.disabled = true;
+    this.autoApproveButton = document.createElement("button");
+    this.autoApproveButton.classList.add(
+      "btn",
+      "pulsar-acp-agent-auto-approve",
+    );
+    this.updateAutoApproveButton();
+    this.subscriptions.add(
+      atom.tooltips.add(this.autoApproveButton, {
+        title: "Auto-approve permission prompts for this session using allow once.",
+        class: "pulsar-acp-agent-tooltip",
+      }),
+    );
+    this.autoApproveButton.addEventListener("click", () => {
+      this.autoApprovePermissions = !this.autoApprovePermissions;
+      this.updateAutoApproveButton();
+    });
     actions.appendChild(this.attachButton);
+    actions.appendChild(this.autoApproveButton);
     actions.appendChild(this.stopButton);
     actions.appendChild(this.sendButton);
 
@@ -401,6 +420,20 @@ export class PulsarAcpAgentView {
     button.textContent = label;
     button.addEventListener("click", onClick);
     return button;
+  }
+
+  private updateAutoApproveButton(): void {
+    if (this.autoApprovePermissions) {
+      this.autoApproveButton.textContent = "Permissions: Allow all";
+      this.autoApproveButton.classList.add(
+        "pulsar-acp-agent-auto-approve--on",
+      );
+    } else {
+      this.autoApproveButton.textContent = "Permissions: Ask";
+      this.autoApproveButton.classList.remove(
+        "pulsar-acp-agent-auto-approve--on",
+      );
+    }
   }
 
   private toggleInfoPanel(): void {
@@ -1426,6 +1459,23 @@ export class PulsarAcpAgentView {
 
     this.setGeneratingState("awaiting");
     this.setAgentStatus("awaiting");
+
+    // Auto-approve: pick allow_once first, fall back to allow_always.
+    if (this.autoApprovePermissions) {
+      const option =
+        params.options?.find((o) => o.kind === "allow_once") ??
+        params.options?.find((o) => o.kind === "allow_always");
+      if (option) {
+        respond({
+          outcome: { outcome: "selected", optionId: option.optionId },
+        });
+        if (this.session.running) {
+          this.setGeneratingState("working");
+          this.setAgentStatus("working");
+        }
+        return;
+      }
+    }
 
     const block = document.createElement("div");
     block.classList.add("pulsar-acp-agent-permission");

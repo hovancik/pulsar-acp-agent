@@ -549,6 +549,21 @@
     gap: (@component-padding / 2);
     margin-top: (@component-padding / 2);
   }
+
+  .pulsar-acp-agent-auto-approve {
+    font-size: 0.82em;
+    opacity: 0.7;
+
+    &:hover {
+      opacity: 1;
+    }
+
+    &.pulsar-acp-agent-auto-approve--on {
+      opacity: 1;
+      color: @text-color-warning;
+      border-color: @text-color-warning;
+    }
+  }
 }
 
 .pulsar-acp-agent-thumbnails {

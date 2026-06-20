@@ -60,6 +60,10 @@ included in prompts.
 - Newline: `Shift+Enter`
 - Stop: cancel current turn
 - Restart: button in the agent details panel (click the agent name)
+- **Permissions: Ask / Allow all**: footer toggle to auto-approve ACP permission
+  prompts for the current session. Uses `allow_once` when available. This only
+  auto-approves requests made through Pulsar over ACP; it does not sandbox or
+  restrict the agent process in any way.
 
 If the agent advertises image prompt support, attach PNG, JPEG, GIF, or WebP
 images up to 5 MiB via the attachment button, drag-and-drop, or paste.
