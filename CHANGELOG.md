@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added ACP `terminal/*` capability.
 - Added agent info panel: click the agent name in the header to reveal its version, advertised capabilities and metadata as key/value rows, and a Restart button.
 - Added image attachment support for PNG, JPEG, GIF, and WebP files up to 5 MiB.
-- Added session list in the sessions bar: browse past sessions and switch when the agent supports loading sessions.
-- Added delete button per session entry (shown when the agent advertises `sessionCapabilities.delete`).
+- Added session list in the panel header (history icon): browse past sessions and switch when the agent supports loading sessions.
+- Added trashcan delete button per session entry (shown when the agent advertises `sessionCapabilities.delete`).
 - Agent responses are now rendered as Markdown (GFM), formatted live as the text streams in.
 - Added a configurable host-context hint so agents know they are connected through Pulsar ACP Agent inside Pulsar.
 - Permission prompts now show the command or URL from `rawInput` and a collapsible raw-input section.
