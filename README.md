@@ -75,11 +75,11 @@ connecting, then solid for ready, working, or error, and the theme's warning
 color while awaiting your confirmation of a permission request. Click the tile
 to reveal the panel.
 
-After connection, a **Sessions** bar appears at the top of the panel. It lists
+After connection, a **Sessions** list is accessible via the history icon in the panel header. It lists
 past sessions when the agent advertises `sessionCapabilities.list`; switching is
 enabled when the agent also advertises `loadSession`. If the agent advertises
-`sessionCapabilities.delete`, a `×` button appears on hover to permanently
-remove a session.
+`sessionCapabilities.delete`, a trashcan button appears on hover to permanently
+remove a session. Use the **+** icon in the header to start a new session.
 
 New sessions use the first open project folder as their working directory.
 Multi-root workspaces are not supported yet: only the first open project folder

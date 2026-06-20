@@ -596,85 +596,117 @@
   border-radius: @component-border-radius;
 }
 
-.pulsar-acp-agent-sessions-bar {
-  position: relative;
-  // Raise above the conversation so the floating list overlays it.
-  z-index: 10;
-  border-bottom: 1px solid @pane-item-border-color;
-  font-size: 0.9em;
-}
+.pulsar-acp-agent-sessions-toggle,
+.pulsar-acp-agent-new-session {
+  flex-shrink: 0;
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  color: @text-color-subtle;
+  cursor: pointer;
+  line-height: 1;
 
-.pulsar-acp-agent-sessions-controls {
-  display: flex;
-  align-items: center;
-  padding: (@component-padding / 2) @component-padding (@component-padding / 2)
-    @component-padding;
-  gap: (@component-padding / 2);
-
-  .pulsar-acp-agent-sessions-toggle {
-    flex: 1;
-    text-align: left;
-    background: none;
-    border: none;
-    color: @text-color-subtle;
-    padding: 2px 0;
-    font-size: 0.82em;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    cursor: pointer;
-
-    &:hover {
-      color: @text-color;
-    }
-
-    &:focus {
-      outline: none;
-    }
-
-    &:focus-visible {
-      outline: 1px solid @text-color-info;
-      outline-offset: 2px;
-    }
+  &::before {
+    margin-right: 0;
   }
 
-  .pulsar-acp-agent-new-session {
-    flex-shrink: 0;
-    padding: 2px 10px;
-    font-size: 0.82em;
+  &:hover {
+    color: @text-color;
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &:focus-visible {
+    outline: 1px solid @text-color-info;
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+.pulsar-acp-agent-sessions-toggle {
+  margin-left: auto;
+
+  &[aria-expanded="true"] {
+    color: @text-color;
   }
 }
 
 .pulsar-acp-agent-sessions-list {
-  // Overlay: float below the controls, over the conversation, instead of
-  // pushing it down. The sessions-bar bottom border becomes the separator
-  // between the SESSIONS header and the dropped list.
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 100%;
-  max-height: 20vh;
+  max-height: 50vh;
   overflow-y: auto;
-  background-color: @overlay-background-color;
-  // Frame the floating list with the theme's overlay border; the sessions-bar
-  // bottom border forms the top edge / separator from the SESSIONS header.
-  border: 1px solid @overlay-border-color;
-  border-top: none;
-  padding: (@component-padding / 4) (@component-padding / 2)
-    (@component-padding / 2);
+  background-color: @tool-panel-background-color;
+  border-bottom: 1px solid @pane-item-border-color;
+  padding: (@component-padding / 4) 0;
 }
 
 .pulsar-acp-agent-session-row {
   display: flex;
-  align-items: stretch;
-  border-radius: @component-border-radius;
+  align-items: center;
+  padding: 0 (@component-padding / 2);
+  border-bottom: 1px solid fade(@pane-item-border-color, 40%);
 
-  &:hover {
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &.is-active {
+    background-color: fade(@text-color-info, 15%);
+  }
+
+  &:not(.is-active):hover {
     background-color: @background-color-highlight;
   }
 
-  &:hover .pulsar-acp-agent-session-delete {
+  &:hover .pulsar-acp-agent-session-delete,
+  &.is-active .pulsar-acp-agent-session-delete {
     opacity: 1;
+  }
+}
+
+.pulsar-acp-agent-session-entry {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: (@component-padding / 2);
+  text-align: left;
+  background: none;
+  border: none;
+  padding: (@component-padding * 0.6) (@component-padding / 2);
+  cursor: pointer;
+  font-family: inherit;
+
+  &:disabled {
+    cursor: default;
+  }
+
+  .pulsar-acp-agent-session-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: @text-color;
+    font-size: 0.9em;
+    line-height: 1.3;
+
+    .is-active & {
+      font-weight: 600;
+      color: @text-color-highlight;
+    }
+  }
+
+  .pulsar-acp-agent-session-time {
+    flex-shrink: 0;
+    color: @text-color-subtle;
+    font-size: 0.78em;
+    font-variant-numeric: tabular-nums;
   }
 }
 
@@ -684,70 +716,23 @@
   background: none;
   border: none;
   color: @text-color-subtle;
-  padding: 0 (@component-padding / 2);
+  padding: 4px 6px;
   cursor: pointer;
-  font-size: 1.05em;
+  font-size: 1em;
   line-height: 1;
+  border-radius: @component-border-radius;
+
+  &::before {
+    margin-right: 0;
+  }
 
   &:hover:not(:disabled) {
     color: @text-color-error;
-  }
-
-  &:disabled {
-    cursor: default;
-  }
-}
-
-.pulsar-acp-agent-session-entry {
-  display: flex;
-  align-items: baseline;
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 6px 8px;
-  gap: (@component-padding / 2);
-  color: @text-color;
-  border-radius: @component-border-radius;
-  cursor: pointer;
-
-  &:hover:not(:disabled) {
-    background: none;
-  }
-
-  &.is-active {
-    color: @text-color-highlight;
-    box-shadow: inset 2px 0 0 @text-color-info;
-    background-color: fade(@text-color-info, 9%);
-  }
-
-  &.is-active .pulsar-acp-agent-session-title {
-    font-weight: 600;
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-
-  &.is-active:disabled {
     opacity: 1;
   }
 
-  .pulsar-acp-agent-session-title {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    line-height: 1.3;
-  }
-
-  .pulsar-acp-agent-session-time {
-    flex-shrink: 0;
-    color: @text-color-subtle;
-    font-size: 0.8em;
-    font-variant-numeric: tabular-nums;
+  &:disabled {
+    cursor: default;
   }
 }
 
