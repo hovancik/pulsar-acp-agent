@@ -328,7 +328,7 @@ export class PulsarAcpAgentView {
     this.updateAutoApproveButton();
     this.subscriptions.add(
       atom.tooltips.add(this.autoApproveButton, {
-        title: "Auto-approve permission prompts for this session using allow once.",
+        title: "Auto-approve permission prompts for this session using allow once. Resets on new session or restart.",
         class: "pulsar-acp-agent-tooltip",
       }),
     );
@@ -619,6 +619,8 @@ export class PulsarAcpAgentView {
     this.imageSupportKnown = false;
     this.supportsImages = false;
     this.attachButton.style.display = "";
+    this.autoApprovePermissions = false;
+    this.updateAutoApproveButton();
     this.resetAgentChrome();
     this.resetSessionsChrome();
     this.setLifecycleStatus("Idle \u2014 type a message to start the agent.");
@@ -681,6 +683,8 @@ export class PulsarAcpAgentView {
 
   private startNewSession(): void {
     if (this.session.running || this.session.switching) return;
+    this.autoApprovePermissions = false;
+    this.updateAutoApproveButton();
     // Cache the outgoing conversation: the agent keeps it loaded, so returning
     // to it must restore this DOM rather than re-load (which the agent rejects).
     const currentId = this.session.sessionId;
@@ -1460,11 +1464,9 @@ export class PulsarAcpAgentView {
     this.setGeneratingState("awaiting");
     this.setAgentStatus("awaiting");
 
-    // Auto-approve: pick allow_once first, fall back to allow_always.
+    // Auto-approve: only use allow_once to avoid issuing persistent grants.
     if (this.autoApprovePermissions) {
-      const option =
-        params.options?.find((o) => o.kind === "allow_once") ??
-        params.options?.find((o) => o.kind === "allow_always");
+      const option = params.options?.find((o) => o.kind === "allow_once");
       if (option) {
         respond({
           outcome: { outcome: "selected", optionId: option.optionId },
