@@ -66,6 +66,8 @@ included in prompts.
 If the agent advertises image prompt support, attach PNG, JPEG, GIF, or WebP
 images up to 5 MiB via the attachment button, drag-and-drop, or paste.
 
+![Image attachment preview before sending a prompt](docs/images/image-attachment.png)
+
 Once connected, the header shows the agent's name. Click the name to open the agent
 details: version, advertised capabilities and metadata as key/value rows, and a
 Restart button. A status row below the header shows the current mode and token
@@ -78,6 +80,8 @@ name when known, otherwise `Agent`, plus a state dot: a hollow ring while
 connecting, then solid for ready, working, or error, and the theme's warning
 color while awaiting your confirmation of a permission request. Click the tile
 to reveal the panel.
+
+![Pulsar status bar tile showing the agent ready state](docs/images/status-bar-tile.png)
 
 A **Permissions** pill in the footer toggles between `Ask` (default) and
 `Allow all`. In `Allow all` mode, ACP permission prompts are auto-approved for
