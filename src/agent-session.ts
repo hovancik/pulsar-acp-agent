@@ -154,10 +154,9 @@ export class AgentSession {
       atom.config.get("pulsar-acp-agent.command") || "copilot --acp --stdio";
     const [command, ...args] = parseCommandLine(commandLine);
     if (!command) {
-      const message =
-        "No agent command configured. Set it in the Agent package settings.";
-      this.emit({ type: "error", message });
-      throw new Error(message);
+      throw new Error(
+        "No agent command configured. Set it in the Agent package settings.",
+      );
     }
     const cwd = this.cwd();
     this.emit({ type: "status", text: `Starting ${command}\u2026` });
@@ -181,7 +180,7 @@ export class AgentSession {
         const code = (error as NodeJS.ErrnoException).code;
         const message =
           code === "ENOENT"
-            ? `Could not find "${command}". Install it and/or set its path in the Agent package settings.`
+            ? `Could not find "${command}". Press Restart to try again. If it still fails, install it and/or set its full path in the Agent package settings.`
             : `Agent process error: ${error.message}`;
         this.cancelPendingPermissions();
         reject(new Error(message));

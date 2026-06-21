@@ -2,7 +2,7 @@
 
 Pulsar package for using [Agent Client Protocol (ACP)](https://agentclientprotocol.com)-compatible coding agents inside the editor.
 
-Much of this package was written by AI coding agents, with human review.
+> This package is being written by AI coding agents, with human guidance.
 
 Currently tested with GitHub Copilot CLI and Mistral Vibe.
 
