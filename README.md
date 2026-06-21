@@ -55,11 +55,13 @@ included in prompts.
 ## Use
 
 - Toggle panel: `Ctrl+Alt+A`
-- Command palette: `Pulsar ACP Agent: Toggle`
+- Command palette: `Pulsar ACP Agent: Toggle Panel`
 - Send: `Enter`
 - Newline: `Shift+Enter`
 - Stop: cancel current turn
 - Restart: button in the agent details panel (click the agent name)
+
+![Pulsar ACP Agent chat panel in Pulsar](docs/images/panel-idle.png)
 
 If the agent advertises image prompt support, attach PNG, JPEG, GIF, or WebP
 images up to 5 MiB via the attachment button, drag-and-drop, or paste.
@@ -68,6 +70,8 @@ Once connected, the header shows the agent's name. Click the name to open the ag
 details: version, advertised capabilities and metadata as key/value rows, and a
 Restart button. A status row below the header shows the current mode and token
 usage when the agent reports them.
+
+![Agent details showing version and capabilities](docs/images/agent-details.png)
 
 When Pulsar's status bar service is available, it shows a tile with the agent
 name when known, otherwise `Agent`, plus a state dot: a hollow ring while
@@ -82,11 +86,20 @@ prompt is shown normally. The toggle is session-local and resets when the view
 is closed, restarted, or switched to a different session. It does not sandbox
 or restrict what the agent process can do; it only skips the confirmation dialog.
 
-After connection, a **Sessions** list is accessible via the history icon in the panel header. It lists
-past sessions when the agent advertises `sessionCapabilities.list`; switching is
+![Permission prompts for agent file edits](docs/images/permission-prompts.png)
+
+Tool calls, diffs and terminal output are rendered inline in the conversation,
+with long output collapsed behind a **Show more** toggle.
+
+![Agent tool output while working](docs/images/tool-output.png)
+
+After connection, a **Sessions** list is accessible via the history icon in the
+panel header when the agent advertises `sessionCapabilities.list`; switching is
 enabled when the agent also advertises `loadSession`. If the agent advertises
 `sessionCapabilities.delete`, a trashcan button appears on hover to permanently
 remove a session. Use the **+** icon in the header to start a new session.
+
+![Session history and restored conversation](docs/images/session-history.png)
 
 New sessions use the first open project folder as their working directory.
 Multi-root workspaces are not supported yet: only the first open project folder
@@ -156,7 +169,7 @@ over ACP. They do not restrict what the agent does in its own process:
   session working directory; an agent-requested absolute `cwd` is allowed only
   inside the project. Commands run as separate processes with your user account.
   There is **no per-command approval prompt** and no sandbox — a launched command
-  can do anything your account can. Stop requests turn cancellation; terminals
+  can do anything your account can. Stop cancels the current turn; terminals
   are killed when the agent releases/kills them, when you switch or restart
   sessions, or when you close the panel.
 
