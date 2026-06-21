@@ -381,6 +381,7 @@ export class PulsarAcpAgentView {
       "pulsar-acp-agent-attach",
     );
     this.attachButton.setAttribute("aria-label", "Attach image");
+    this.attachButton.style.display = "none";
     this.subscriptions.add(
       atom.tooltips.add(this.attachButton, {
         title: "Attach image (or drag-and-drop / paste)",
@@ -665,7 +666,7 @@ export class PulsarAcpAgentView {
     this.clearConversation();
     this.imageSupportKnown = false;
     this.supportsImages = false;
-    this.attachButton.style.display = "";
+    this.attachButton.style.display = "none";
     this.resetAgentChrome();
     this.resetSessionsChrome();
     this.setLifecycleStatus("Idle \u2014 type a message to start the agent.");
@@ -883,7 +884,9 @@ export class PulsarAcpAgentView {
           this.stickToBottom = true;
           this.conversation.scrollTop = this.conversation.scrollHeight;
         }
-        this.sessionsToggle.style.display = "";
+        this.sessionsToggle.style.display = this.session.canListSessions()
+          ? ""
+          : "none";
         this.newSessionButton.style.display = "";
         this.updateSessionControls();
         this.updateInputControls();
@@ -1254,7 +1257,8 @@ export class PulsarAcpAgentView {
       !this.session.running &&
       !this.session.switching &&
       !this.preparingPrompt &&
-      (!this.imageSupportKnown || this.supportsImages)
+      this.imageSupportKnown &&
+      this.supportsImages
     );
   }
 
