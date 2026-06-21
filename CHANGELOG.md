@@ -35,11 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chat text is now selectable and copyable with Ctrl/Cmd+C and right-click Copy.
 - Conversation now reliably auto-scrolls to follow streamed agent output, and stops following when you scroll up.
 - Input textarea now uses theme variables instead of browser defaults.
-- Startup failures are now surfaced in the panel and expose the Restart action.
-- Missing agent command errors now suggest pressing Restart before changing settings.
-- Hide the session history button when the agent does not support listing sessions.
-- Hide image attachment until the agent confirms image prompt support.
-
 ## [0.1.0] - 2026-06-15
 
 ### Added
