@@ -1,7 +1,7 @@
 {
   "name": "pulsar-acp-agent",
   "main": "./lib/main.js",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Bring your own AI coding agent to Pulsar via the Agent Client Protocol (ACP).",
   "keywords": [
     "acp",
@@ -57,7 +57,7 @@
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
-    "@agentclientprotocol/sdk": "^0.25.0",
+    "@agentclientprotocol/sdk": "^0.28.1",
     "@types/atom": "npm:@pulsar-edit/types@^1.132.0",
     "@types/cross-spawn": "^6.0.6",
     "@types/node": "^20.19.0",
