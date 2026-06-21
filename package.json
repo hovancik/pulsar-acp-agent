@@ -23,6 +23,7 @@
   },
   "homepage": "https://github.com/hovancik/pulsar-acp-agent#readme",
   "files": [
+    "docs",
     "keymaps",
     "lib",
     "menus",
