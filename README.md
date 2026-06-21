@@ -75,6 +75,13 @@ connecting, then solid for ready, working, or error, and the theme's warning
 color while awaiting your confirmation of a permission request. Click the tile
 to reveal the panel.
 
+A **Permissions** pill in the footer toggles between `Ask` (default) and
+`Allow all`. In `Allow all` mode, ACP permission prompts are auto-approved for
+the session using `allow_once`. If no `allow_once` option is offered, the
+prompt is shown normally. The toggle is session-local and resets when the view
+is closed, restarted, or switched to a different session. It does not sandbox
+or restrict what the agent process can do; it only skips the confirmation dialog.
+
 After connection, a **Sessions** list is accessible via the history icon in the panel header. It lists
 past sessions when the agent advertises `sessionCapabilities.list`; switching is
 enabled when the agent also advertises `loadSession`. If the agent advertises

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a **Permissions** pill in the footer to toggle session-local auto-approval of ACP permission prompts (`Permissions: Ask` / `Permissions: Allow all`). When enabled, prompts are silently approved using `allow_once`; if no `allow_once` option is offered the prompt is shown normally. The setting is not persisted.
 - Added a "Scroll to bottom" button that appears when you scroll up in the conversation, and disappears once you reach the bottom.
 - Added a loading placeholder when opening a stored session: the conversation pane shows a pulsing "Loading session…" overlay while history is replayed, and reveals the restored conversation once ready.
 - Added ACP `terminal/*` capability.

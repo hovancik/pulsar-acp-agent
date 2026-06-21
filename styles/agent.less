@@ -551,6 +551,26 @@
   }
 }
 
+.pulsar-acp-agent-auto-approve {
+  font-size: 0.85em;
+  opacity: 0.7;
+
+  &:hover {
+    opacity: 1;
+  }
+
+  &.pulsar-acp-agent-auto-approve--on {
+    opacity: 1;
+    color: @text-color-warning;
+    border-color: @text-color-warning;
+    background-color: fade(@text-color-warning, 10%);
+
+    &:hover {
+      background-color: fade(@text-color-warning, 20%);
+    }
+  }
+}
+
 .pulsar-acp-agent-thumbnails {
   display: flex;
   flex-wrap: wrap;

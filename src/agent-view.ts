@@ -98,6 +98,8 @@ export class PulsarAcpAgentView {
   private generatingIndicator: HTMLElement | null = null;
   private sendButton!: HTMLButtonElement;
   private stopButton!: HTMLButtonElement;
+  private autoApproveButton!: HTMLButtonElement;
+  private autoApprovePermissions = false;
   private newSessionButton!: HTMLButtonElement;
   private sessionsToggle!: HTMLButtonElement;
   private sessionsList!: HTMLElement;
@@ -370,7 +372,25 @@ export class PulsarAcpAgentView {
     });
     this.stopButton.classList.add("pulsar-acp-agent-stop");
     this.stopButton.disabled = true;
+    this.autoApproveButton = document.createElement("button");
+    this.autoApproveButton.classList.add(
+      "btn",
+      "pulsar-acp-agent-auto-approve",
+    );
+    this.autoApproveButton.textContent = "Permissions: Ask";
+    this.autoApproveButton.setAttribute("aria-pressed", "false");
+    this.autoApproveButton.addEventListener("click", () => {
+      this.autoApprovePermissions = !this.autoApprovePermissions;
+      this.updateAutoApproveButton();
+    });
+    this.subscriptions.add(
+      atom.tooltips.add(this.autoApproveButton, {
+        title:
+          "Auto-approve permission prompts for this session using allow once.",
+      }),
+    );
     actions.appendChild(this.attachButton);
+    actions.appendChild(this.autoApproveButton);
     actions.appendChild(this.stopButton);
     actions.appendChild(this.sendButton);
 
@@ -411,6 +431,24 @@ export class PulsarAcpAgentView {
     button.textContent = label;
     button.addEventListener("click", onClick);
     return button;
+  }
+
+  private updateAutoApproveButton(): void {
+    this.autoApproveButton.setAttribute(
+      "aria-pressed",
+      String(this.autoApprovePermissions),
+    );
+    if (this.autoApprovePermissions) {
+      this.autoApproveButton.textContent = "Permissions: Allow all";
+      this.autoApproveButton.classList.add(
+        "pulsar-acp-agent-auto-approve--on",
+      );
+    } else {
+      this.autoApproveButton.textContent = "Permissions: Ask";
+      this.autoApproveButton.classList.remove(
+        "pulsar-acp-agent-auto-approve--on",
+      );
+    }
   }
 
   private toggleInfoPanel(): void {
@@ -612,6 +650,8 @@ export class PulsarAcpAgentView {
     this.renderLiveRow();
     this.stopButton.disabled = true;
     this.updateInputControls();
+    this.autoApprovePermissions = false;
+    this.updateAutoApproveButton();
 
     // Restart is user-initiated on a visible panel, so reconnect immediately
     // rather than waiting for the panel to be shown again.
@@ -669,6 +709,8 @@ export class PulsarAcpAgentView {
 
   private startNewSession(): void {
     if (this.session.running || this.session.switching) return;
+    this.autoApprovePermissions = false;
+    this.updateAutoApproveButton();
     // Cache the outgoing conversation: the agent keeps it loaded, so returning
     // to it must restore this DOM rather than re-load (which the agent rejects).
     const currentId = this.session.sessionId;
@@ -690,6 +732,8 @@ export class PulsarAcpAgentView {
 
   private switchToSession(id: string): void {
     if (this.session.running || this.session.switching) return;
+    this.autoApprovePermissions = false;
+    this.updateAutoApproveButton();
     this.hideLoadingOverlay();
     const currentId = this.session.sessionId;
     const info = this.knownSessions.find((s) => s.sessionId === id);
@@ -1445,6 +1489,19 @@ export class PulsarAcpAgentView {
   ): void {
     const toolCall = params.toolCall;
     const toolTitle = toolCall?.title || "an action";
+
+    if (this.autoApprovePermissions) {
+      const option =
+        params.options?.find((o) => o.kind === "allow_once");
+      if (option) {
+        respond({ outcome: { outcome: "selected", optionId: option.optionId } });
+        if (this.session.running) {
+          this.setGeneratingState("working");
+          this.setAgentStatus("working");
+        }
+        return;
+      }
+    }
 
     this.setGeneratingState("awaiting");
     this.setAgentStatus("awaiting");
