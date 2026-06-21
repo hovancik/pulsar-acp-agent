@@ -109,3 +109,5 @@ When reviewing changes, explicitly check:
 - **Never commit unless explicitly asked.** Make code changes, run checks, and
   report back — but do not run `git commit` (or `git push`) without an explicit
   instruction from the developer.
+- **Never commit on `trunk`.** If a commit is requested while on `trunk`, stop and
+  ask the developer to create or switch to a feature branch first.

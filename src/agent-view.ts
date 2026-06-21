@@ -163,9 +163,32 @@ export class PulsarAcpAgentView {
 
   private ensureStarted(): void {
     this.disconnectStartObserver();
-    this.session.start().catch(() => {
-      // Errors are surfaced via the event stream; suppress the unhandled rejection.
+    const currentSession = this.session;
+    this.session.start().catch((error) => {
+      if (this.session !== currentSession) return;
+      this.handleStartupError(error);
     });
+  }
+
+  private handleStartupError(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.hideLoadingOverlay();
+    this.setGeneratingState(null);
+    this.appendError(message);
+    this.agentExited = true;
+    this.currentMode = null;
+    this.currentTokens = null;
+    this.renderLiveRow();
+    this.setLifecycleStatus("Startup failed.");
+    this.setAgentStatus("error");
+    this.infoPanelOpen = true;
+    this.renderInfoPanel();
+    this.infoPanel.style.display = "";
+    this.agentNameEl.classList.add("pulsar-acp-agent-name--active");
+    this.resetSessionsChrome();
+    this.stopButton.disabled = true;
+    this.updateInputControls();
+    this.endStreamingBlocks();
   }
 
   private buildUI(): void {
@@ -481,7 +504,7 @@ export class PulsarAcpAgentView {
   private renderPill(): void {
     const info = this.storedAgentInfo;
     const name = info ? info.title || info.name : null;
-    this.agentNameEl.textContent = name || "Starting\u2026";
+    this.agentNameEl.textContent = name || (this.agentExited ? "Agent" : "Starting\u2026");
     this.agentNameEl.style.display = "";
     const hasPanel = info != null || this.agentExited;
     this.agentNameEl.disabled = !hasPanel;
@@ -913,6 +936,7 @@ export class PulsarAcpAgentView {
         this.updateInputControls();
         break;
       case "exit": {
+        if (this.agentExited) break;
         this.hideLoadingOverlay();
         this.setGeneratingState(null);
         const detail = `exited${event.code != null ? ` (code ${event.code})` : ""}`;
