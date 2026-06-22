@@ -15,7 +15,7 @@ In Pulsar, open **Settings → Install**, search for `pulsar-acp-agent`, and cli
 ppm install pulsar-acp-agent
 ```
 
-Package page: <https://web.pulsar-edit.dev/packages/pulsar-acp-agent>
+Package page: <https://packages.pulsar-edit.dev/packages/pulsar-acp-agent>
 
 ## Example configuration with Copilot CLI
 
