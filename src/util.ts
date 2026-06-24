@@ -33,6 +33,24 @@ export function parseCommandLine(line: string): string[] {
   return tokens;
 }
 
+// Config-option choices may arrive flat or grouped; flatten to one ordered list.
+export function flattenConfigSelectOptions(
+  options: acp.SessionConfigSelectOptions,
+): acp.SessionConfigSelectOption[] {
+  return (
+    options as Array<acp.SessionConfigSelectOption | acp.SessionConfigSelectGroup>
+  ).flatMap((entry) => ("group" in entry ? entry.options : [entry]));
+}
+
+// Resolves a select option's current value to its display name, falling back to
+// the raw value id when the value isn't present in the option list.
+export function configOptionLabel(option: acp.SessionConfigSelect): string {
+  const match = flattenConfigSelectOptions(option.options).find(
+    (choice) => choice.value === option.currentValue,
+  );
+  return match?.name || option.currentValue;
+}
+
 export type InfoRow = { key: string; value: string };
 
 export function flattenInfoRows(value: unknown): InfoRow[] {

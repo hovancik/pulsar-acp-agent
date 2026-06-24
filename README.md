@@ -70,8 +70,8 @@ images up to 5 MiB via the attachment button, drag-and-drop, or paste.
 
 Once connected, the header shows the agent's name. Click the name to open the agent
 details: version, advertised capabilities and metadata as key/value rows, and a
-Restart button. A status row below the header shows the current mode and token
-usage when the agent reports them.
+Restart button. A status row below the header shows context-token usage when the
+agent reports it.
 
 ![Agent details showing version and capabilities](docs/images/agent-details.png)
 
@@ -89,6 +89,11 @@ the session using `allow_once`. If no `allow_once` option is offered, the
 prompt is shown normally. The toggle is session-local and resets when the view
 is closed, restarted, or switched to a different session. It does not sandbox
 or restrict what the agent process can do; it only skips the confirmation dialog.
+
+When the agent exposes session configuration options (such as model, custom
+agent, or reasoning effort), the footer shows a dropdown for each. Selecting a
+value applies it to the active session; the agent stays authoritative, so the
+dropdowns reflect whatever it reports back. Options are per-session.
 
 ![Permission prompts for agent file edits](docs/images/permission-prompts.png)
 
