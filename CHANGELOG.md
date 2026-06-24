@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added per-session config option dropdowns in the footer for agent-exposed selectors such as model, custom agent, and reasoning effort (ACP `configOptions`).
 
+### Changed
+
+- Session history list now takes less vertical space.
+
 ## [0.2.0] - 2026-06-21
 
 ### Added

@@ -26,7 +26,9 @@ drives the agent process and emits events → view renders them.
 
 - **Discuss before coding.** Never start writing code before discussing the
   approach and getting the developer's agreement. When more than one option is
-  possible, lay out the trade-offs and agree on a direction first.
+  possible, lay out the trade-offs and agree on a direction first. Before
+  recommending an approach, check it's the current protocol mechanism and how
+  Zed does it.
 - **Be minimalistic.** Prefer the smallest change that fully solves the problem.
   Avoid new dependencies, abstractions, and configuration unless clearly needed.
   Keep commit messages, changelog entries, and doc updates short and direct — no filler words.
@@ -50,6 +52,11 @@ drives the agent process and emits events → view renders them.
   Zed and other ACP-capable editors solve the same problem, alongside the ACP
   docs and the `@agentclientprotocol/sdk` source. Prefer proven patterns from
   these references over inventing your own.
+- **Prefer the current protocol mechanism.** ACP sometimes has more than one way
+  to do the same thing (session modes vs. a `mode` config option). The schema
+  marks superseded and UNSTABLE surface — check it and build on the current
+  mechanism, not the old one. If you end up building two overlapping mechanisms
+  and hiding one, stop and rethink the approach.
 - **Think about security.** When making any change, consider the security
   implications — don't introduce code that leaks secrets, weakens sandboxing,
   trusts unvalidated input, or expands attack surface unnecessarily.
