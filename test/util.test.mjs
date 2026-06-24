@@ -2,7 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 // Imports the built bundle, not src/util.ts: tests run on Pulsar's Node (20.16,
 // per .nvmrc), which can't execute TypeScript. `npm run build` emits lib/util.js.
-import { flattenInfoRows, parseCommandLine, TerminalRecord } from "../lib/util.js";
+import {
+  configOptionLabel,
+  flattenConfigSelectOptions,
+  flattenInfoRows,
+  parseCommandLine,
+  TerminalRecord,
+} from "../lib/util.js";
 
 // ---------------------------------------------------------------------------
 // parseCommandLine
@@ -103,6 +109,51 @@ test("parseCommandLine: does not interpret shell metacharacters", () => {
     "cat",
     ";",
     "id",
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// configOptionLabel / flattenConfigSelectOptions
+// ---------------------------------------------------------------------------
+
+test("configOptionLabel: resolves the current value to its name", () => {
+  const option = {
+    currentValue: "gpt-5",
+    options: [
+      { value: "gpt-5", name: "GPT-5" },
+      { value: "opus", name: "Claude Opus" },
+    ],
+  };
+  assert.equal(configOptionLabel(option), "GPT-5");
+});
+
+test("configOptionLabel: resolves a value inside a group", () => {
+  const option = {
+    currentValue: "acp-helper",
+    options: [
+      {
+        group: "custom",
+        name: "Custom",
+        options: [{ value: "acp-helper", name: "ACP Helper" }],
+      },
+    ],
+  };
+  assert.equal(configOptionLabel(option), "ACP Helper");
+});
+
+test("configOptionLabel: falls back to the value id when not found", () => {
+  const option = { currentValue: "unknown", options: [{ value: "x", name: "X" }] };
+  assert.equal(configOptionLabel(option), "unknown");
+});
+
+test("flattenConfigSelectOptions: flattens groups into a single list", () => {
+  const grouped = [
+    { group: "a", name: "A", options: [{ value: "1", name: "One" }] },
+    { group: "b", name: "B", options: [{ value: "2", name: "Two" }] },
+  ];
+  assert.deepEqual(flattenConfigSelectOptions(grouped), [
+    { value: "1", name: "One" },
+    { value: "2", name: "Two" },
   ]);
 });
 

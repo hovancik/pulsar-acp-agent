@@ -111,6 +111,7 @@ export class AgentSession {
   private terminals = new Map<string, TerminalRecord>();
   private loadedSessionIds = new Set<string>();
   private hostContextSentSessionIds = new Set<string>();
+  private sessionConfigOptions = new Map<string, acp.SessionConfigOption[]>();
 
   onEvent(callback: Listener): { dispose: () => void } {
     this.listeners.add(callback);
@@ -148,6 +149,7 @@ export class AgentSession {
       this.cancelPendingPermissions();
       this.cleanupTerminals();
       this.loadedSessionIds.clear();
+      this.sessionConfigOptions.clear();
     }
 
     const commandLine: string =
@@ -209,6 +211,7 @@ export class AgentSession {
       this.cancelPendingPermissions();
       this.cleanupTerminals();
       this.loadedSessionIds.clear();
+      this.sessionConfigOptions.clear();
       this.emit({ type: "exit", code, signal });
     });
 
@@ -292,6 +295,8 @@ export class AgentSession {
     this.sessionId = session.sessionId;
     this.sessionCwd = cwd;
     this.loadedSessionIds.add(session.sessionId);
+    if (session.configOptions)
+      this.sessionConfigOptions.set(session.sessionId, session.configOptions);
     this.emit({ type: "ready", source: "start" });
     this.refreshSessionList();
   }
@@ -312,6 +317,29 @@ export class AgentSession {
 
   supportsImages(): boolean {
     return this.promptCapabilities?.image === true;
+  }
+
+  currentSessionConfigOptions(): acp.SessionConfigOption[] | null {
+    if (!this.sessionId) return null;
+    return this.sessionConfigOptions.get(this.sessionId) ?? null;
+  }
+
+  async setConfigOption(configId: string, value: string): Promise<void> {
+    if (!this.connection || !this.sessionId) {
+      throw new Error("Agent session is not ready.");
+    }
+    const sessionId = this.sessionId;
+    const result = await this.connection.setSessionConfigOption({
+      sessionId,
+      configId,
+      value,
+    });
+    // The response carries the full, authoritative option set (one change can
+    // affect others). Skip if the session was deleted mid-request so we don't
+    // resurrect its entry.
+    if (this.loadedSessionIds.has(sessionId)) {
+      this.sessionConfigOptions.set(sessionId, result.configOptions);
+    }
   }
 
   private shouldSendHostContext(): boolean {
@@ -456,6 +484,9 @@ export class AgentSession {
         if (params.sessionId !== expectedId) return;
         const update = this.filterHostContextUpdate(params.update);
         if (!update) return;
+        if (update.sessionUpdate === "config_option_update") {
+          this.sessionConfigOptions.set(params.sessionId, update.configOptions);
+        }
         this.emit({
           type: "update",
           sessionId: params.sessionId,
@@ -828,6 +859,7 @@ export class AgentSession {
       await this.assertSessionCwdAllowed(scopedCwd, "delete");
       await this.connection.deleteSession({ sessionId: id });
       this.loadedSessionIds.delete(id);
+      this.sessionConfigOptions.delete(id);
       if (deletedActive) {
         this.sessionId = null;
         this.cleanupTerminals();
@@ -852,6 +884,8 @@ export class AgentSession {
       this.sessionCwd = cwd;
       this.cleanupTerminals();
       this.loadedSessionIds.add(session.sessionId);
+      if (session.configOptions)
+        this.sessionConfigOptions.set(session.sessionId, session.configOptions);
       this.switching = false;
       this.emit({ type: "ready", source: "new" });
       this.refreshSessionList();
@@ -878,7 +912,7 @@ export class AgentSession {
     try {
       const sessionCwd = cwd ?? this.cwd();
       await this.assertSessionCwdAllowed(sessionCwd, "load");
-      await this.connection.loadSession(
+      const loaded = await this.connection.loadSession(
         this.loadSessionRequest(id, sessionCwd),
       );
       this.sessionId = id;
@@ -886,6 +920,8 @@ export class AgentSession {
       this.sessionCwd = sessionCwd;
       this.cleanupTerminals();
       this.loadedSessionIds.add(id);
+      if (loaded?.configOptions)
+        this.sessionConfigOptions.set(id, loaded.configOptions);
       this.switching = false;
       this.emit({ type: "ready", source: "load" });
       this.refreshSessionList();

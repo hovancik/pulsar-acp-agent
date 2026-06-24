@@ -72,7 +72,7 @@ terminal whose output is shown in the panel.
 | `user_message_chunk` | ✅ | Echoed user content. |
 | `tool_call` / `tool_call_update` | ✅ | Rendered with title, status, and content. Permission prompts extract command/URL from `rawInput` and include a collapsible raw-input section. |
 | `plan` | ✅ | Execution plan list. |
-| `current_mode_update` | 🟡 | Shown in the header live row (display only — see modes below). |
+| `current_mode_update` | ⬜ | Not surfaced directly; agents that expose mode as a session config option drive it through the selectors below. |
 | `usage_update` | ✅ | Context-token usage shown in the header live row. |
 | `available_commands_update` | ⬜ | Slash commands the agent exposes (e.g. `/login`, `/compact`). Not surfaced yet. |
 
@@ -89,10 +89,10 @@ terminal whose output is shown in the panel.
 
 | ACP feature | Status | Notes |
 | --- | --- | --- |
-| Model display | ⬜ | Current model name display is not implemented. |
-| Model selection | ⬜ | Switching models via session config options / a model selector. |
-| Session modes (`session/set_mode`) | ⬜ | We display the current mode but cannot switch it (e.g. ask vs. code). |
-| Session config options | ⬜ | Generic per-session selectors an agent can expose. |
+| Model display | 🟡 | The model config selector's button shows the current model when the agent exposes a `model` option. |
+| Model selection | ✅ | Switch models when the agent exposes a `model` session config option (see below). |
+| Session modes (`session/set_mode`) | ⬜ | Superseded by session config options, which expose `mode` as a selectable option; the legacy standalone selector is not implemented. |
+| Session config options | ✅ | Footer dropdown per `select` config option (model, custom agent, reasoning effort, …); `boolean` options are not yet surfaced. |
 | Host context hint | ✅ | A configurable first-prompt hint tells the agent it is connected through Pulsar ACP Agent inside Pulsar, plus session `_meta` for protocol-aware agents. |
 | MCP servers | ⬜ | `session/new` is called with an empty `mcpServers` list; we could forward user-configured MCP servers to the agent. |
 | Extensibility (`_meta`) | 🟡 | We read a `terminal-auth` hint to build login guidance and send host-context metadata for protocol-aware agents; `_meta` is the spec's escape hatch for vendor data. |
@@ -100,8 +100,8 @@ terminal whose output is shown in the panel.
 ## Suggested priorities
 
 1. **Slash commands** (`available_commands_update`) — cheap, high-value UX; surfaces agent-native commands.
-2. **Session modes / model selection** — let users drive the agent's built-in options instead of only seeing them.
-3. **Rich prompt content** — attach the current file/selection or images.
+2. **Rich prompt content** — attach the current file/selection or images.
+3. **Boolean config options** — render the `boolean` config option kind; only `select` is surfaced today.
 4. **Logout** — account switching without a restart.
 5. **Session close** — free agent-side resources when leaving a session.
 

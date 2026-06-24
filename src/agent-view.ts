@@ -3,7 +3,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { AgentEvent, AgentSession } from "./agent-session";
-import { flattenInfoRows } from "./util";
+import { configOptionLabel, flattenConfigSelectOptions, flattenInfoRows } from "./util";
 
 marked.setOptions({ breaks: true });
 
@@ -57,6 +57,142 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
 const SUPPORTED_IMAGE_ACCEPT = Array.from(SUPPORTED_IMAGE_MIME_TYPES).join(",");
 const SUPPORTED_IMAGE_LABEL = "PNG, JPEG, GIF, or WebP";
 
+type SelectConfigOption = Extract<acp.SessionConfigOption, { type: "select" }>;
+
+// In-flight lock key, scoped per session so an option set in one session can't
+// disable the same-id option in another.
+function configLockKey(sessionId: string | null, configId: string): string {
+  return `${sessionId}\u0000${configId}`;
+}
+
+// A single dropdown for one session config option; re-rendered on each update to
+// track the agent's authoritative option set.
+class ConfigSelector {
+  readonly element: HTMLElement;
+  private button: HTMLButtonElement;
+  private menu: HTMLElement;
+  private tooltips = new CompositeDisposable();
+  private menuVisible = false;
+
+  constructor(
+    private readonly onSelect: (configId: string, value: string) => void,
+    private readonly disabled: () => boolean,
+    private readonly closeSiblings: () => void,
+  ) {
+    this.element = document.createElement("div");
+    this.element.classList.add("pulsar-acp-agent-config");
+
+    this.menu = document.createElement("div");
+    this.menu.classList.add("pulsar-acp-agent-config-menu");
+    this.menu.setAttribute("role", "menu");
+    this.menu.style.display = "none";
+
+    this.button = document.createElement("button");
+    this.button.classList.add("btn", "pulsar-acp-agent-config-trigger");
+    this.button.setAttribute("aria-haspopup", "true");
+    this.button.setAttribute("aria-expanded", "false");
+    this.button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.toggleMenu();
+    });
+
+    this.element.appendChild(this.menu);
+    this.element.appendChild(this.button);
+  }
+
+  contains(node: Node): boolean {
+    return this.element.contains(node);
+  }
+
+  focusButton(): void {
+    this.button.focus();
+  }
+
+  get isOpen(): boolean {
+    return this.menuVisible;
+  }
+
+  toggleMenu(): void {
+    if (this.menuVisible) this.closeMenu();
+    else this.openMenu();
+  }
+
+  openMenu(): void {
+    if (this.button.disabled) return;
+    this.closeSiblings();
+    this.menuVisible = true;
+    this.menu.style.display = "";
+    this.button.setAttribute("aria-expanded", "true");
+  }
+
+  closeMenu(): void {
+    if (!this.menuVisible) return;
+    this.menuVisible = false;
+    this.menu.style.display = "none";
+    this.button.setAttribute("aria-expanded", "false");
+  }
+
+  updateDisabled(): void {
+    this.button.disabled = this.disabled();
+  }
+
+  render(option: SelectConfigOption): void {
+    this.button.textContent = configOptionLabel(option);
+
+    this.menu.replaceChildren();
+    this.tooltips.dispose();
+    this.tooltips = new CompositeDisposable();
+
+    if (option.description) {
+      this.tooltips.add(
+        atom.tooltips.add(this.button, {
+          title: option.description,
+          html: false,
+          class: "pulsar-acp-agent-tooltip",
+        }),
+      );
+    }
+
+    for (const choice of flattenConfigSelectOptions(option.options)) {
+      const item = document.createElement("button");
+      item.classList.add("pulsar-acp-agent-config-item");
+      item.setAttribute("role", "menuitemradio");
+      const isActive = choice.value === option.currentValue;
+      item.setAttribute("aria-checked", String(isActive));
+      if (isActive) item.classList.add("is-active");
+
+      const name = document.createElement("span");
+      name.classList.add("pulsar-acp-agent-config-name");
+      name.textContent = choice.name;
+      item.appendChild(name);
+
+      if (choice.description) {
+        this.tooltips.add(
+          atom.tooltips.add(item, {
+            title: choice.description,
+            html: false,
+            class: "pulsar-acp-agent-tooltip",
+          }),
+        );
+      }
+
+      item.addEventListener("click", () => {
+        this.closeMenu();
+        this.onSelect(option.id, choice.value);
+      });
+      this.menu.appendChild(item);
+    }
+
+    this.updateDisabled();
+  }
+
+  dispose(): void {
+    this.closeMenu();
+    this.tooltips.dispose();
+    this.element.remove();
+  }
+}
+
 export class PulsarAcpAgentView {
   element!: HTMLElement;
   private subscriptions: CompositeDisposable;
@@ -83,7 +219,6 @@ export class PulsarAcpAgentView {
   private infoPanelOpen = false;
   private storedAgentInfo: acp.Implementation | null = null;
   private storedCapabilities: acp.AgentCapabilities | null = null;
-  private currentMode: string | null = null;
   private currentTokens: string | null = null;
   private lifecycleStatus = "";
   private agentExited = false;
@@ -108,10 +243,10 @@ export class PulsarAcpAgentView {
   private sessionsListVisible = false;
   private knownSessions: acp.SessionInfo[] = [];
   private sessionConversationCache = new Map<string, HTMLElement>();
-  private sessionLiveState = new Map<
-    string,
-    { mode: string | null; tokens: string | null }
-  >();
+  private sessionLiveState = new Map<string, { tokens: string | null }>();
+  private configSelectorsContainer!: HTMLElement;
+  private configSelectors: ConfigSelector[] = [];
+  private settingConfig = new Set<string>();
 
   private pendingImages: PendingImage[] = [];
   private pendingImageLoads = 0;
@@ -176,7 +311,6 @@ export class PulsarAcpAgentView {
     this.setGeneratingState(null);
     this.appendError(message);
     this.agentExited = true;
-    this.currentMode = null;
     this.currentTokens = null;
     this.renderLiveRow();
     this.setLifecycleStatus("Startup failed.");
@@ -413,6 +547,7 @@ export class PulsarAcpAgentView {
           "Auto-approve permission prompts for this session using allow once.",
       }),
     );
+    actions.appendChild(this.buildConfigSelectors());
     actions.appendChild(this.attachButton);
     actions.appendChild(this.autoApproveButton);
     actions.appendChild(this.stopButton);
@@ -455,6 +590,120 @@ export class PulsarAcpAgentView {
     button.textContent = label;
     button.addEventListener("click", onClick);
     return button;
+  }
+
+  private buildConfigSelectors(): HTMLElement {
+    const container = document.createElement("div");
+    container.classList.add("pulsar-acp-agent-config-selectors");
+    container.style.display = "none";
+    this.configSelectorsContainer = container;
+
+    const onDocClick = (event: MouseEvent) => {
+      for (const selector of this.configSelectors) {
+        if (selector.isOpen && !selector.contains(event.target as Node)) {
+          selector.closeMenu();
+        }
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      for (const selector of this.configSelectors) {
+        if (selector.isOpen) {
+          selector.closeMenu();
+          selector.focusButton();
+        }
+      }
+    };
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    this.subscriptions.add({
+      dispose: () => {
+        document.removeEventListener("click", onDocClick);
+        document.removeEventListener("keydown", onKeyDown);
+      },
+    });
+
+    return container;
+  }
+
+  private closeAllConfigMenus(): void {
+    for (const selector of this.configSelectors) selector.closeMenu();
+  }
+
+  private updateConfigSelectorsDisabled(): void {
+    for (const selector of this.configSelectors) selector.updateDisabled();
+  }
+
+  private renderConfigSelectors(): void {
+    const options = this.session.currentSessionConfigOptions();
+    const selects = (options ?? []).filter(
+      (o): o is SelectConfigOption => o.type === "select",
+    );
+
+    // Rebuild so the rendered selectors match the agent's current option list.
+    for (const selector of this.configSelectors) selector.dispose();
+    this.configSelectors = [];
+    this.configSelectorsContainer.replaceChildren();
+
+    if (selects.length === 0) {
+      this.configSelectorsContainer.style.display = "none";
+      return;
+    }
+    this.configSelectorsContainer.style.display = "";
+
+    for (const option of selects) {
+      const configId = option.id;
+      const selector = new ConfigSelector(
+        (id, value) => this.selectConfigOption(id, value),
+        () =>
+          this.session.switching ||
+          this.settingConfig.has(
+            configLockKey(this.session.sessionId, configId),
+          ),
+        () => this.closeAllConfigMenus(),
+      );
+      selector.render(option);
+      this.configSelectors.push(selector);
+      this.configSelectorsContainer.appendChild(selector.element);
+    }
+  }
+
+  private selectConfigOption(configId: string, value: string): void {
+    const options = this.session.currentSessionConfigOptions();
+    const option = options?.find(
+      (o): o is SelectConfigOption => o.id === configId && o.type === "select",
+    );
+    if (!option || option.currentValue === value) return;
+    const sessionId = this.session.sessionId;
+    const lockKey = configLockKey(sessionId, configId);
+    if (this.session.switching || this.settingConfig.has(lockKey)) return;
+
+    const previous = option.currentValue;
+    // Optimistic update with revert on failure. Revert the captured option if
+    // it still holds our value (even after a session switch); guard the error
+    // and re-render on the active session so a switch or a concurrent
+    // config_option_update can't desync the UI.
+    option.currentValue = value;
+    this.settingConfig.add(lockKey);
+    this.renderConfigSelectors();
+    this.session
+      .setConfigOption(configId, value)
+      .catch((error) => {
+        if (option.currentValue === value) option.currentValue = previous;
+        if (this.session.sessionId === sessionId) {
+          this.appendError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      })
+      .finally(() => {
+        this.settingConfig.delete(lockKey);
+        if (this.session.sessionId === sessionId) {
+          this.renderConfigSelectors();
+        } else {
+          this.updateConfigSelectorsDisabled();
+        }
+      });
   }
 
   private updateAutoApproveButton(): void {
@@ -501,7 +750,7 @@ export class PulsarAcpAgentView {
   }
 
   // Identity disclosure. Lifecycle and turn state live in the status bar tile;
-  // mode and token usage live in the separate live row.
+  // token usage lives in the separate live row.
   private renderPill(): void {
     const info = this.storedAgentInfo;
     const name = info ? info.title || info.name : null;
@@ -700,10 +949,11 @@ export class PulsarAcpAgentView {
   private resetAgentChrome(): void {
     this.storedAgentInfo = null;
     this.storedCapabilities = null;
-    this.currentMode = null;
     this.currentTokens = null;
     this.agentExited = false;
+    this.settingConfig.clear();
     this.renderLiveRow();
+    this.renderConfigSelectors();
     this.renderPill();
     this.infoPanel.style.display = "none";
     this.infoPanel.innerHTML = "";
@@ -782,7 +1032,6 @@ export class PulsarAcpAgentView {
     this.resetConversationState();
     // session/load replays history asynchronously; cover the blank pane with a
     // pulsing overlay until the "ready" event reveals the restored conversation.
-    this.currentMode = null;
     this.currentTokens = null;
     this.setLifecycleStatus("Loading session\u2026");
     this.setAgentStatus("connecting");
@@ -876,6 +1125,7 @@ export class PulsarAcpAgentView {
         this.renderPill();
         this.setAgentStatus("ready");
         this.restoreLiveStateFor(this.session.sessionId);
+        this.renderConfigSelectors();
         if (event.source === "new") {
           this.clearConversation();
         }
@@ -944,9 +1194,9 @@ export class PulsarAcpAgentView {
         this.setGeneratingState(null);
         const detail = `exited${event.code != null ? ` (code ${event.code})` : ""}`;
         this.agentExited = true;
-        this.currentMode = null;
         this.currentTokens = null;
         this.renderLiveRow();
+        this.renderConfigSelectors();
         this.setLifecycleStatus(`Agent ${detail}.`);
         this.setAgentStatus("error");
         // Auto-open details so Restart stays reachable even if the agent died
@@ -985,10 +1235,8 @@ export class PulsarAcpAgentView {
       case "plan":
         this.renderPlan(update.entries || []);
         break;
-      case "current_mode_update":
-        this.currentMode = update.currentModeId || null;
-        this.rememberLiveState(sessionId, "mode", this.currentMode);
-        this.renderLiveRow();
+      case "config_option_update":
+        this.renderConfigSelectors();
         break;
       case "usage_update":
         if (
@@ -996,7 +1244,7 @@ export class PulsarAcpAgentView {
           typeof update.size === "number"
         ) {
           this.currentTokens = `${update.used}\u202f/\u202f${update.size} tokens`;
-          this.rememberLiveState(sessionId, "tokens", this.currentTokens);
+          this.rememberLiveState(sessionId, this.currentTokens);
           this.renderLiveRow();
         }
         break;
@@ -1273,6 +1521,7 @@ export class PulsarAcpAgentView {
       this.preparingPrompt;
     this.sendButton.disabled = busy || this.pendingImageLoads > 0;
     this.attachButton.disabled = busy || !this.canAcceptImages();
+    this.updateConfigSelectorsDisabled();
   }
 
   private appendNote(text: string): void {
@@ -1831,32 +2080,19 @@ export class PulsarAcpAgentView {
   }
 
   private renderLiveRow(): void {
-    const parts = [this.currentMode, this.currentTokens].filter(
-      (p): p is string => p != null && p.length > 0,
-    );
-    const text = parts.join(" \u00b7 ");
+    const text = this.currentTokens ?? "";
     this.liveStatusEl.textContent = text;
     this.liveStatusEl.style.display = text ? "" : "none";
   }
 
-  // Mode and token usage are per-session; remember them so switching back to a
-  // session restores its live row instead of showing a blank one.
-  private rememberLiveState(
-    sessionId: string,
-    key: "mode" | "tokens",
-    value: string | null,
-  ): void {
-    const state = this.sessionLiveState.get(sessionId) ?? {
-      mode: null,
-      tokens: null,
-    };
-    state[key] = value;
-    this.sessionLiveState.set(sessionId, state);
+  // Token usage is per-session; remember it so switching back to a session
+  // restores its live row instead of showing a blank one.
+  private rememberLiveState(sessionId: string, tokens: string | null): void {
+    this.sessionLiveState.set(sessionId, { tokens });
   }
 
   private restoreLiveStateFor(sessionId: string | null): void {
     const state = sessionId ? this.sessionLiveState.get(sessionId) : undefined;
-    this.currentMode = state?.mode ?? null;
     this.currentTokens = state?.tokens ?? null;
     this.renderLiveRow();
   }
@@ -1957,6 +2193,8 @@ export class PulsarAcpAgentView {
     this.reporter?.clear(this);
     this.sessionTooltips.dispose();
     this.thumbnailTooltips.dispose();
+    for (const selector of this.configSelectors) selector.dispose();
+    this.configSelectors = [];
     this.subscriptions.dispose();
     this.session.dispose();
     if (this.element) this.element.remove();
