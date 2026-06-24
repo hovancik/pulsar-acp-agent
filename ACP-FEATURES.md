@@ -72,7 +72,7 @@ terminal whose output is shown in the panel.
 | `user_message_chunk` | ✅ | Echoed user content. |
 | `tool_call` / `tool_call_update` | ✅ | Rendered with title, status, and content. Permission prompts extract command/URL from `rawInput` and include a collapsible raw-input section. |
 | `plan` | ✅ | Execution plan list. |
-| `current_mode_update` | 🟡 | Shown in the header live row (display only — see modes below). |
+| `current_mode_update` | ✅ | Reflected live in the footer mode selector. |
 | `usage_update` | ✅ | Context-token usage shown in the header live row. |
 | `available_commands_update` | ⬜ | Slash commands the agent exposes (e.g. `/login`, `/compact`). Not surfaced yet. |
 
@@ -91,8 +91,8 @@ terminal whose output is shown in the panel.
 | --- | --- | --- |
 | Model display | ⬜ | Current model name display is not implemented. |
 | Model selection | ⬜ | Switching models via session config options / a model selector. |
-| Session modes (`session/set_mode`) | ⬜ | We display the current mode but cannot switch it (e.g. ask vs. code). |
-| Session config options | ⬜ | Generic per-session selectors an agent can expose. |
+| Session modes (`session/set_mode`) | ✅ | Footer selector lists `availableModes` and switches the current mode; reflects agent-pushed `current_mode_update`. Shown only when the agent advertises modes. |
+| Session config options | ⬜ | Generic per-session selectors an agent can expose via `configOptions` on the `session/new` response. Copilot uses these for `mode`, `model`, `reasoning_effort`, custom agents (the `_agent` select, e.g. agents from `.github/agents/*.agent.md`), and `allow_all`. Notably **custom agents do not appear in `modes.availableModes`** (only Agent/Plan/Autopilot do) — they are only reachable through `configOptions`. Rendering these would let users switch model and custom agent persona from Pulsar. See `.github/agents/acp-helper.agent.md` for an example agent. |
 | Host context hint | ✅ | A configurable first-prompt hint tells the agent it is connected through Pulsar ACP Agent inside Pulsar, plus session `_meta` for protocol-aware agents. |
 | MCP servers | ⬜ | `session/new` is called with an empty `mcpServers` list; we could forward user-configured MCP servers to the agent. |
 | Extensibility (`_meta`) | 🟡 | We read a `terminal-auth` hint to build login guidance and send host-context metadata for protocol-aware agents; `_meta` is the spec's escape hatch for vendor data. |
@@ -100,7 +100,7 @@ terminal whose output is shown in the panel.
 ## Suggested priorities
 
 1. **Slash commands** (`available_commands_update`) — cheap, high-value UX; surfaces agent-native commands.
-2. **Session modes / model selection** — let users drive the agent's built-in options instead of only seeing them.
+2. **Model selection / session config options** — let users drive the agent's other built-in options (session modes are now switchable; Copilot also exposes a model picker via `configOptions`).
 3. **Rich prompt content** — attach the current file/selection or images.
 4. **Logout** — account switching without a restart.
 5. **Session close** — free agent-side resources when leaving a session.

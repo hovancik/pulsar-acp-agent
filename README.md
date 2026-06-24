@@ -70,10 +70,15 @@ images up to 5 MiB via the attachment button, drag-and-drop, or paste.
 
 Once connected, the header shows the agent's name. Click the name to open the agent
 details: version, advertised capabilities and metadata as key/value rows, and a
-Restart button. A status row below the header shows the current mode and token
-usage when the agent reports them.
+Restart button. A status row below the header shows token usage when the agent
+reports it.
 
 ![Agent details showing version and capabilities](docs/images/agent-details.png)
+
+When the agent advertises session modes (for example GitHub Copilot's
+*Agent*, *Plan*, and *Autopilot*), a mode selector appears at the left of
+the footer showing the current mode. Pick another mode to switch it; the agent
+may also change it mid-session, and the selector updates to match.
 
 When Pulsar's status bar service is available, it shows a tile with the agent
 name when known, otherwise `Agent`, plus a state dot: a hollow ring while

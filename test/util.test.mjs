@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 // Imports the built bundle, not src/util.ts: tests run on Pulsar's Node (20.16,
 // per .nvmrc), which can't execute TypeScript. `npm run build` emits lib/util.js.
-import { flattenInfoRows, parseCommandLine, TerminalRecord } from "../lib/util.js";
+import { flattenInfoRows, modeLabel, parseCommandLine, TerminalRecord } from "../lib/util.js";
 
 // ---------------------------------------------------------------------------
 // parseCommandLine
@@ -104,6 +104,30 @@ test("parseCommandLine: does not interpret shell metacharacters", () => {
     ";",
     "id",
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// modeLabel
+// ---------------------------------------------------------------------------
+
+test("modeLabel: resolves a known mode id to its name", () => {
+  const state = {
+    availableModes: [
+      { id: "ask", name: "Ask" },
+      { id: "code", name: "Code" },
+    ],
+    currentModeId: "ask",
+  };
+  assert.equal(modeLabel(state, "code"), "Code");
+});
+
+test("modeLabel: falls back to the id for an unknown mode", () => {
+  const state = { availableModes: [{ id: "ask", name: "Ask" }], currentModeId: "ask" };
+  assert.equal(modeLabel(state, "https://example/#x"), "https://example/#x");
+});
+
+test("modeLabel: falls back to the id when state is null", () => {
+  assert.equal(modeLabel(null, "code"), "code");
 });
 
 // ---------------------------------------------------------------------------

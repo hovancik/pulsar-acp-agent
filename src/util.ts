@@ -33,6 +33,17 @@ export function parseCommandLine(line: string): string[] {
   return tokens;
 }
 
+// Resolves a session mode id to its human-readable name. Agents may use opaque
+// ids (Copilot uses URLs like ".../session-modes#agent"), so fall back to the
+// id itself when the mode is not found in the available list.
+export function modeLabel(
+  state: acp.SessionModeState | null | undefined,
+  modeId: string,
+): string {
+  const mode = state?.availableModes.find((m) => m.id === modeId);
+  return mode?.name || modeId;
+}
+
 export type InfoRow = { key: string; value: string };
 
 export function flattenInfoRows(value: unknown): InfoRow[] {

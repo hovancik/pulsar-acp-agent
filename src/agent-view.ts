@@ -3,7 +3,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { AgentEvent, AgentSession } from "./agent-session";
-import { flattenInfoRows } from "./util";
+import { flattenInfoRows, modeLabel } from "./util";
 
 marked.setOptions({ breaks: true });
 
@@ -83,7 +83,6 @@ export class PulsarAcpAgentView {
   private infoPanelOpen = false;
   private storedAgentInfo: acp.Implementation | null = null;
   private storedCapabilities: acp.AgentCapabilities | null = null;
-  private currentMode: string | null = null;
   private currentTokens: string | null = null;
   private lifecycleStatus = "";
   private agentExited = false;
@@ -100,18 +99,21 @@ export class PulsarAcpAgentView {
   private stopButton!: HTMLButtonElement;
   private autoApproveButton!: HTMLButtonElement;
   private autoApprovePermissions = false;
+  private modeSelector!: HTMLElement;
+  private modeButton!: HTMLButtonElement;
+  private modeMenu!: HTMLElement;
+  private modeMenuVisible = false;
+  private settingMode = false;
   private newSessionButton!: HTMLButtonElement;
   private sessionsToggle!: HTMLButtonElement;
   private sessionsList!: HTMLElement;
   private sessionTooltips = new CompositeDisposable();
   private thumbnailTooltips = new CompositeDisposable();
+  private modeTooltips = new CompositeDisposable();
   private sessionsListVisible = false;
   private knownSessions: acp.SessionInfo[] = [];
   private sessionConversationCache = new Map<string, HTMLElement>();
-  private sessionLiveState = new Map<
-    string,
-    { mode: string | null; tokens: string | null }
-  >();
+  private sessionLiveState = new Map<string, string | null>();
 
   private pendingImages: PendingImage[] = [];
   private pendingImageLoads = 0;
@@ -176,7 +178,6 @@ export class PulsarAcpAgentView {
     this.setGeneratingState(null);
     this.appendError(message);
     this.agentExited = true;
-    this.currentMode = null;
     this.currentTokens = null;
     this.renderLiveRow();
     this.setLifecycleStatus("Startup failed.");
@@ -413,6 +414,7 @@ export class PulsarAcpAgentView {
           "Auto-approve permission prompts for this session using allow once.",
       }),
     );
+    actions.appendChild(this.buildModeSelector());
     actions.appendChild(this.attachButton);
     actions.appendChild(this.autoApproveButton);
     actions.appendChild(this.stopButton);
@@ -455,6 +457,165 @@ export class PulsarAcpAgentView {
     button.textContent = label;
     button.addEventListener("click", onClick);
     return button;
+  }
+
+  private buildModeSelector(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.classList.add("pulsar-acp-agent-mode");
+    wrap.style.display = "none";
+
+    this.modeMenu = document.createElement("div");
+    this.modeMenu.classList.add("pulsar-acp-agent-mode-menu");
+    this.modeMenu.setAttribute("role", "menu");
+    this.modeMenu.style.display = "none";
+
+    this.modeButton = document.createElement("button");
+    this.modeButton.classList.add("btn", "pulsar-acp-agent-mode-trigger");
+    this.modeButton.setAttribute("aria-haspopup", "true");
+    this.modeButton.setAttribute("aria-expanded", "false");
+    this.modeButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.toggleModeMenu();
+    });
+    this.subscriptions.add(
+      atom.tooltips.add(this.modeButton, {
+        title: "Switch the agent's session mode",
+      }),
+    );
+
+    wrap.appendChild(this.modeMenu);
+    wrap.appendChild(this.modeButton);
+    this.modeSelector = wrap;
+
+    const onDocClick = (event: MouseEvent) => {
+      if (this.modeMenuVisible && !wrap.contains(event.target as Node)) {
+        this.closeModeMenu();
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (this.modeMenuVisible && event.key === "Escape") {
+        this.closeModeMenu();
+        this.modeButton.focus();
+      }
+    };
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    this.subscriptions.add({
+      dispose: () => {
+        document.removeEventListener("click", onDocClick);
+        document.removeEventListener("keydown", onKeyDown);
+      },
+    });
+
+    return wrap;
+  }
+
+  private renderModeSelector(): void {
+    const state = this.session.currentSessionModes();
+    if (!state || state.availableModes.length === 0) {
+      this.modeSelector.style.display = "none";
+      this.closeModeMenu();
+      this.modeMenu.replaceChildren();
+      this.modeTooltips.dispose();
+      this.modeTooltips = new CompositeDisposable();
+      return;
+    }
+    this.modeSelector.style.display = "";
+    this.modeButton.textContent = modeLabel(state, state.currentModeId);
+
+    this.modeMenu.replaceChildren();
+    this.modeTooltips.dispose();
+    this.modeTooltips = new CompositeDisposable();
+    for (const mode of state.availableModes) {
+      const item = document.createElement("button");
+      item.classList.add("pulsar-acp-agent-mode-item");
+      item.setAttribute("role", "menuitemradio");
+      const isActive = mode.id === state.currentModeId;
+      item.setAttribute("aria-checked", String(isActive));
+      if (isActive) item.classList.add("is-active");
+
+      const name = document.createElement("span");
+      name.classList.add("pulsar-acp-agent-mode-name");
+      name.textContent = mode.name;
+      item.appendChild(name);
+
+      if (mode.description) {
+        this.modeTooltips.add(
+          atom.tooltips.add(item, {
+            title: mode.description,
+            html: false,
+            class: "pulsar-acp-agent-tooltip",
+          }),
+        );
+      }
+
+      item.addEventListener("click", () => this.selectMode(mode.id));
+      this.modeMenu.appendChild(item);
+    }
+    this.updateModeSelectorDisabled();
+  }
+
+  private updateModeSelectorDisabled(): void {
+    // ACP allows set_mode during generation, so we don't gate on `running`
+    // (matching Zed) — only on a session switch or an in-flight set_mode.
+    this.modeButton.disabled = this.session.switching || this.settingMode;
+  }
+
+  private toggleModeMenu(): void {
+    if (this.modeMenuVisible) {
+      this.closeModeMenu();
+    } else {
+      this.openModeMenu();
+    }
+  }
+
+  private openModeMenu(): void {
+    if (this.modeButton.disabled) return;
+    this.modeMenuVisible = true;
+    this.modeMenu.style.display = "";
+    this.modeButton.setAttribute("aria-expanded", "true");
+  }
+
+  private closeModeMenu(): void {
+    if (!this.modeMenuVisible) return;
+    this.modeMenuVisible = false;
+    this.modeMenu.style.display = "none";
+    this.modeButton.setAttribute("aria-expanded", "false");
+  }
+
+  private selectMode(modeId: string): void {
+    this.closeModeMenu();
+    const state = this.session.currentSessionModes();
+    if (!state || modeId === state.currentModeId) return;
+    if (this.session.switching || this.settingMode) return;
+
+    const previous = state.currentModeId;
+    // Optimistic update with revert on failure. We capture `state`/`previous`
+    // and re-check the active session before reverting or showing errors, so a
+    // session switch or a concurrent current_mode_update can't desync the UI.
+    state.currentModeId = modeId;
+    this.settingMode = true;
+    this.renderModeSelector();
+    this.session
+      .setMode(modeId)
+      .catch((error) => {
+        if (state.currentModeId === modeId) state.currentModeId = previous;
+        if (this.session.currentSessionModes() === state) {
+          this.appendError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      })
+      .finally(() => {
+        this.settingMode = false;
+        if (this.session.currentSessionModes() === state) {
+          this.renderModeSelector();
+        } else {
+          // A different session is active now; just clear its disabled state,
+          // which settingMode left stuck on while the request was in flight.
+          this.updateModeSelectorDisabled();
+        }
+      });
   }
 
   private updateAutoApproveButton(): void {
@@ -700,10 +861,10 @@ export class PulsarAcpAgentView {
   private resetAgentChrome(): void {
     this.storedAgentInfo = null;
     this.storedCapabilities = null;
-    this.currentMode = null;
     this.currentTokens = null;
     this.agentExited = false;
     this.renderLiveRow();
+    this.renderModeSelector();
     this.renderPill();
     this.infoPanel.style.display = "none";
     this.infoPanel.innerHTML = "";
@@ -782,7 +943,6 @@ export class PulsarAcpAgentView {
     this.resetConversationState();
     // session/load replays history asynchronously; cover the blank pane with a
     // pulsing overlay until the "ready" event reveals the restored conversation.
-    this.currentMode = null;
     this.currentTokens = null;
     this.setLifecycleStatus("Loading session\u2026");
     this.setAgentStatus("connecting");
@@ -876,6 +1036,7 @@ export class PulsarAcpAgentView {
         this.renderPill();
         this.setAgentStatus("ready");
         this.restoreLiveStateFor(this.session.sessionId);
+        this.renderModeSelector();
         if (event.source === "new") {
           this.clearConversation();
         }
@@ -944,9 +1105,9 @@ export class PulsarAcpAgentView {
         this.setGeneratingState(null);
         const detail = `exited${event.code != null ? ` (code ${event.code})` : ""}`;
         this.agentExited = true;
-        this.currentMode = null;
         this.currentTokens = null;
         this.renderLiveRow();
+        this.renderModeSelector();
         this.setLifecycleStatus(`Agent ${detail}.`);
         this.setAgentStatus("error");
         // Auto-open details so Restart stays reachable even if the agent died
@@ -986,9 +1147,7 @@ export class PulsarAcpAgentView {
         this.renderPlan(update.entries || []);
         break;
       case "current_mode_update":
-        this.currentMode = update.currentModeId || null;
-        this.rememberLiveState(sessionId, "mode", this.currentMode);
-        this.renderLiveRow();
+        this.renderModeSelector();
         break;
       case "usage_update":
         if (
@@ -996,7 +1155,7 @@ export class PulsarAcpAgentView {
           typeof update.size === "number"
         ) {
           this.currentTokens = `${update.used}\u202f/\u202f${update.size} tokens`;
-          this.rememberLiveState(sessionId, "tokens", this.currentTokens);
+          this.rememberLiveState(sessionId, this.currentTokens);
           this.renderLiveRow();
         }
         break;
@@ -1273,6 +1432,7 @@ export class PulsarAcpAgentView {
       this.preparingPrompt;
     this.sendButton.disabled = busy || this.pendingImageLoads > 0;
     this.attachButton.disabled = busy || !this.canAcceptImages();
+    this.updateModeSelectorDisabled();
   }
 
   private appendNote(text: string): void {
@@ -1831,33 +1991,20 @@ export class PulsarAcpAgentView {
   }
 
   private renderLiveRow(): void {
-    const parts = [this.currentMode, this.currentTokens].filter(
-      (p): p is string => p != null && p.length > 0,
-    );
-    const text = parts.join(" \u00b7 ");
+    const text = this.currentTokens ?? "";
     this.liveStatusEl.textContent = text;
     this.liveStatusEl.style.display = text ? "" : "none";
   }
 
-  // Mode and token usage are per-session; remember them so switching back to a
-  // session restores its live row instead of showing a blank one.
-  private rememberLiveState(
-    sessionId: string,
-    key: "mode" | "tokens",
-    value: string | null,
-  ): void {
-    const state = this.sessionLiveState.get(sessionId) ?? {
-      mode: null,
-      tokens: null,
-    };
-    state[key] = value;
-    this.sessionLiveState.set(sessionId, state);
+  // Token usage is per-session, so switching back restores it instead of a blank row.
+  private rememberLiveState(sessionId: string, tokens: string | null): void {
+    this.sessionLiveState.set(sessionId, tokens);
   }
 
   private restoreLiveStateFor(sessionId: string | null): void {
-    const state = sessionId ? this.sessionLiveState.get(sessionId) : undefined;
-    this.currentMode = state?.mode ?? null;
-    this.currentTokens = state?.tokens ?? null;
+    this.currentTokens = sessionId
+      ? (this.sessionLiveState.get(sessionId) ?? null)
+      : null;
     this.renderLiveRow();
   }
 
@@ -1957,6 +2104,7 @@ export class PulsarAcpAgentView {
     this.reporter?.clear(this);
     this.sessionTooltips.dispose();
     this.thumbnailTooltips.dispose();
+    this.modeTooltips.dispose();
     this.subscriptions.dispose();
     this.session.dispose();
     if (this.element) this.element.remove();

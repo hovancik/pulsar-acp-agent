@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added a footer mode selector when the agent advertises session modes (e.g. Copilot's Agent / Plan / Autopilot), letting you switch the current mode.
+
 ## [0.2.0] - 2026-06-21
 
 ### Added

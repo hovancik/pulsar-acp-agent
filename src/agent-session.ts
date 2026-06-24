@@ -110,6 +110,7 @@ export class AgentSession {
   >();
   private terminals = new Map<string, TerminalRecord>();
   private loadedSessionIds = new Set<string>();
+  private sessionModes = new Map<string, acp.SessionModeState>();
   private hostContextSentSessionIds = new Set<string>();
 
   onEvent(callback: Listener): { dispose: () => void } {
@@ -148,6 +149,7 @@ export class AgentSession {
       this.cancelPendingPermissions();
       this.cleanupTerminals();
       this.loadedSessionIds.clear();
+      this.sessionModes.clear();
     }
 
     const commandLine: string =
@@ -209,6 +211,7 @@ export class AgentSession {
       this.cancelPendingPermissions();
       this.cleanupTerminals();
       this.loadedSessionIds.clear();
+      this.sessionModes.clear();
       this.emit({ type: "exit", code, signal });
     });
 
@@ -292,6 +295,7 @@ export class AgentSession {
     this.sessionId = session.sessionId;
     this.sessionCwd = cwd;
     this.loadedSessionIds.add(session.sessionId);
+    if (session.modes) this.sessionModes.set(session.sessionId, session.modes);
     this.emit({ type: "ready", source: "start" });
     this.refreshSessionList();
   }
@@ -312,6 +316,22 @@ export class AgentSession {
 
   supportsImages(): boolean {
     return this.promptCapabilities?.image === true;
+  }
+
+  currentSessionModes(): acp.SessionModeState | null {
+    if (!this.sessionId) return null;
+    return this.sessionModes.get(this.sessionId) ?? null;
+  }
+
+  async setMode(modeId: string): Promise<void> {
+    if (!this.connection || !this.sessionId) {
+      throw new Error("Agent session is not ready.");
+    }
+    const sessionId = this.sessionId;
+    // Don't write currentModeId here: the view sets it optimistically and the
+    // agent is authoritative via current_mode_update, so a write after the await
+    // could clobber an update that arrived mid-request.
+    await this.connection.setSessionMode({ sessionId, modeId });
   }
 
   private shouldSendHostContext(): boolean {
@@ -456,6 +476,10 @@ export class AgentSession {
         if (params.sessionId !== expectedId) return;
         const update = this.filterHostContextUpdate(params.update);
         if (!update) return;
+        if (update.sessionUpdate === "current_mode_update") {
+          const state = this.sessionModes.get(params.sessionId);
+          if (state) state.currentModeId = update.currentModeId;
+        }
         this.emit({
           type: "update",
           sessionId: params.sessionId,
@@ -828,6 +852,7 @@ export class AgentSession {
       await this.assertSessionCwdAllowed(scopedCwd, "delete");
       await this.connection.deleteSession({ sessionId: id });
       this.loadedSessionIds.delete(id);
+      this.sessionModes.delete(id);
       if (deletedActive) {
         this.sessionId = null;
         this.cleanupTerminals();
@@ -852,6 +877,7 @@ export class AgentSession {
       this.sessionCwd = cwd;
       this.cleanupTerminals();
       this.loadedSessionIds.add(session.sessionId);
+      if (session.modes) this.sessionModes.set(session.sessionId, session.modes);
       this.switching = false;
       this.emit({ type: "ready", source: "new" });
       this.refreshSessionList();
@@ -878,7 +904,7 @@ export class AgentSession {
     try {
       const sessionCwd = cwd ?? this.cwd();
       await this.assertSessionCwdAllowed(sessionCwd, "load");
-      await this.connection.loadSession(
+      const loaded = await this.connection.loadSession(
         this.loadSessionRequest(id, sessionCwd),
       );
       this.sessionId = id;
@@ -886,6 +912,7 @@ export class AgentSession {
       this.sessionCwd = sessionCwd;
       this.cleanupTerminals();
       this.loadedSessionIds.add(id);
+      if (loaded?.modes) this.sessionModes.set(id, loaded.modes);
       this.switching = false;
       this.emit({ type: "ready", source: "load" });
       this.refreshSessionList();
