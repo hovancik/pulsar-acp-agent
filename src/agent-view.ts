@@ -3,7 +3,13 @@ import * as acp from "@agentclientprotocol/sdk";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { AgentEvent, AgentSession } from "./agent-session";
-import { configOptionLabel, flattenConfigSelectOptions, flattenInfoRows } from "./util";
+import {
+  completedPlanEntries,
+  configOptionLabel,
+  flattenConfigSelectOptions,
+  flattenInfoRows,
+  nextTurnActivePlanEntries,
+} from "./util";
 
 marked.setOptions({ breaks: true });
 
@@ -200,7 +206,9 @@ export class PulsarAcpAgentView {
   private eventSubscription!: { dispose: () => void };
   private toolViews = new Map<string, ToolView>();
   private terminalOutputs = new Map<string, string>();
-  private planElement: HTMLElement | null = null;
+  private activePlanEntries: acp.PlanEntry[] = [];
+  private activePlanSessionId: string | null = null;
+  private planExpanded = false;
   private stderrBody: HTMLElement | null = null;
   private streamRole: string | null = null;
   private streamMessageId: string | null = null;
@@ -228,6 +236,7 @@ export class PulsarAcpAgentView {
   private thumbnailStrip!: HTMLElement;
   private conversation!: HTMLElement;
   private conversationWrapper!: HTMLElement;
+  private planBar!: HTMLElement;
   private loadingOverlay!: HTMLElement;
   private scrollToBottomButton!: HTMLButtonElement;
   private generatingIndicator: HTMLElement | null = null;
@@ -244,6 +253,7 @@ export class PulsarAcpAgentView {
   private knownSessions: acp.SessionInfo[] = [];
   private sessionConversationCache = new Map<string, HTMLElement>();
   private sessionLiveState = new Map<string, { tokens: string | null }>();
+  private sessionPlanState = new Map<string, acp.PlanEntry[]>();
   private configSelectorsContainer!: HTMLElement;
   private configSelectors: ConfigSelector[] = [];
   private settingConfig = new Set<string>();
@@ -429,6 +439,10 @@ export class PulsarAcpAgentView {
     this.conversationWrapper = document.createElement("div");
     this.conversationWrapper.classList.add("pulsar-acp-agent-conversation-wrapper");
 
+    this.planBar = document.createElement("div");
+    this.planBar.classList.add("pulsar-acp-agent-plan-bar");
+    this.planBar.style.display = "none";
+
     this.loadingOverlay = document.createElement("div");
     this.loadingOverlay.classList.add("pulsar-acp-agent-loading-overlay");
     this.loadingOverlay.style.display = "none";
@@ -581,6 +595,7 @@ export class PulsarAcpAgentView {
     this.conversationWrapper.appendChild(this.scrollToBottomButton);
 
     this.element.appendChild(this.conversationWrapper);
+    this.element.appendChild(this.planBar);
     this.element.appendChild(footer);
   }
 
@@ -944,6 +959,7 @@ export class PulsarAcpAgentView {
     this.sessionsToggle.setAttribute("aria-expanded", "false");
     this.sessionConversationCache.clear();
     this.sessionLiveState.clear();
+    this.sessionPlanState.clear();
   }
 
   private resetAgentChrome(): void {
@@ -969,7 +985,9 @@ export class PulsarAcpAgentView {
   private resetConversationState(): void {
     this.toolViews.clear();
     this.terminalOutputs.clear();
-    this.planElement = null;
+    this.activePlanEntries = [];
+    this.activePlanSessionId = null;
+    this.renderPlanBar();
     this.stderrBody = null;
     this.pendingImages = [];
     this.pendingImageLoads = 0;
@@ -989,6 +1007,7 @@ export class PulsarAcpAgentView {
     // to it must restore this DOM rather than re-load (which the agent rejects).
     const currentId = this.session.sessionId;
     if (currentId) {
+      this.rememberPlanStateFor(currentId);
       this.sessionConversationCache.set(currentId, this.conversation);
       this.swapInFreshConversation();
     }
@@ -996,7 +1015,10 @@ export class PulsarAcpAgentView {
       // Roll back to the previous conversation if creating the session failed.
       if (currentId) {
         const prev = this.sessionConversationCache.get(currentId);
-        if (prev) this.swapInConversation(prev);
+        if (prev) {
+          this.swapInConversation(prev);
+          this.restorePlanStateFor(currentId);
+        }
       }
       this.appendError(error instanceof Error ? error.message : String(error));
       this.updateInputControls();
@@ -1014,6 +1036,7 @@ export class PulsarAcpAgentView {
 
     // Save current conversation DOM node (preserves canvas pixels etc.)
     if (currentId) {
+      this.rememberPlanStateFor(currentId);
       this.sessionConversationCache.set(currentId, this.conversation);
       this.swapInFreshConversation();
     }
@@ -1025,6 +1048,7 @@ export class PulsarAcpAgentView {
       this.resetConversationState();
       const cached = this.sessionConversationCache.get(id);
       if (cached !== undefined) this.swapInConversation(cached);
+      this.restorePlanStateFor(id);
       this.session.activateCachedSession(id);
       return;
     }
@@ -1042,7 +1066,10 @@ export class PulsarAcpAgentView {
       this.hideLoadingOverlay();
       if (currentId) {
         const prev = this.sessionConversationCache.get(currentId);
-        if (prev) this.swapInConversation(prev);
+        if (prev) {
+          this.swapInConversation(prev);
+          this.restorePlanStateFor(currentId);
+        }
       }
       this.setLifecycleStatus("");
       this.setAgentStatus("ready");
@@ -1057,6 +1084,9 @@ export class PulsarAcpAgentView {
     fresh.className = this.conversation.className;
     this.conversation.replaceWith(fresh);
     this.conversation = fresh;
+    this.activePlanEntries = [];
+    this.activePlanSessionId = null;
+    this.renderPlanBar();
     this.stickToBottom = true;
     this.updateScrollToBottomButton();
     this.attachConversationScrollListener();
@@ -1131,6 +1161,7 @@ export class PulsarAcpAgentView {
         }
         if (event.source === "load") {
           this.endStreamingBlocks();
+          this.snapshotCompletedPlan();
           this.stickToBottom = true;
           this.conversation.scrollTop = this.conversation.scrollHeight;
         }
@@ -1145,6 +1176,7 @@ export class PulsarAcpAgentView {
         this.renderSessionsList(event.sessions);
         break;
       case "turn-start":
+        this.clearCompletedActivePlanEntries();
         this.setAgentStatus("working");
         this.stopButton.disabled = false;
         this.setGeneratingState("working");
@@ -1159,6 +1191,7 @@ export class PulsarAcpAgentView {
         this.updateInputControls();
         this.updateSessionControls();
         this.endStreamingBlocks();
+        this.snapshotCompletedPlan();
         if (event.stopReason && event.stopReason !== "end_turn") {
           this.appendNote(`Turn stopped: ${event.stopReason}`);
         }
@@ -1233,7 +1266,7 @@ export class PulsarAcpAgentView {
         this.renderToolCall(update);
         break;
       case "plan":
-        this.renderPlan(update.entries || []);
+        this.setActivePlan(update.entries || [], sessionId);
         break;
       case "config_option_update":
         this.renderConfigSelectors();
@@ -1731,33 +1764,173 @@ export class PulsarAcpAgentView {
     node.appendChild(line);
   }
 
-  private renderPlan(entries: acp.PlanEntry[]): void {
-    if (!this.planElement) {
-      this.planElement = document.createElement("div");
-      this.planElement.classList.add("pulsar-acp-agent-plan");
+  private clonePlanEntries(entries: acp.PlanEntry[]): acp.PlanEntry[] {
+    return entries.map((entry) => ({ ...entry }));
+  }
+
+  private rememberPlanStateFor(sessionId: string): void {
+    if (this.activePlanEntries.length > 0) {
+      this.sessionPlanState.set(
+        sessionId,
+        this.clonePlanEntries(this.activePlanEntries),
+      );
+    } else {
+      this.sessionPlanState.delete(sessionId);
     }
-    this.planElement.innerHTML = "";
-    const heading = document.createElement("div");
-    heading.classList.add("pulsar-acp-agent-plan-heading");
-    heading.textContent = "Plan";
-    this.planElement.appendChild(heading);
+  }
+
+  private restorePlanStateFor(sessionId: string | null): void {
+    this.activePlanEntries = sessionId
+      ? this.clonePlanEntries(this.sessionPlanState.get(sessionId) ?? [])
+      : [];
+    this.activePlanSessionId =
+      this.activePlanEntries.length > 0 ? sessionId : null;
+    this.renderPlanBar();
+  }
+
+  private setActivePlan(
+    entries: acp.PlanEntry[],
+    sessionId: string | null,
+  ): void {
+    this.activePlanEntries = this.clonePlanEntries(entries);
+    this.activePlanSessionId =
+      this.activePlanEntries.length > 0 ? sessionId : null;
+    if (sessionId) {
+      if (this.activePlanEntries.length > 0) {
+        this.sessionPlanState.set(
+          sessionId,
+          this.clonePlanEntries(this.activePlanEntries),
+        );
+      } else {
+        this.sessionPlanState.delete(sessionId);
+      }
+    }
+    this.renderPlanBar();
+  }
+
+  private clearActivePlan(sessionId: string | null): void {
+    this.activePlanEntries = [];
+    this.activePlanSessionId = null;
+    if (sessionId) this.sessionPlanState.delete(sessionId);
+    this.renderPlanBar();
+  }
+
+  // The live plan is a pinned bar above the composer (matching Zed and VS
+  // Code) so it stays glanceable while the conversation scrolls; only the
+  // completed plan is snapshotted into the transcript.
+  private renderPlanBar(): void {
+    const entries = this.activePlanEntries;
+    this.planBar.innerHTML = "";
+    if (entries.length === 0) {
+      this.planBar.style.display = "none";
+      return;
+    }
+    this.planBar.style.display = "";
+
+    const total = entries.length;
+    const completed = entries.filter((e) => e.status === "completed").length;
+    const inProgress = entries.find((e) => e.status === "in_progress");
+
+    const header = document.createElement("div");
+    header.classList.add("pulsar-acp-agent-plan-bar-header");
+
+    const twisty = document.createElement("span");
+    twisty.classList.add(
+      "pulsar-acp-agent-plan-bar-twisty",
+      "icon",
+      this.planExpanded ? "icon-chevron-down" : "icon-chevron-right",
+    );
+
+    const title = document.createElement("span");
+    title.classList.add("pulsar-acp-agent-plan-bar-title");
+    title.textContent =
+      !this.planExpanded && inProgress
+        ? `Current: ${inProgress.content}`
+        : "Plan";
+
+    const count = document.createElement("span");
+    count.classList.add("pulsar-acp-agent-plan-bar-count");
+    count.textContent =
+      completed === total
+        ? "All done"
+        : completed === 0
+          ? `${total} tasks`
+          : `${completed}/${total}`;
+
+    const dismiss = document.createElement("button");
+    dismiss.classList.add("pulsar-acp-agent-plan-bar-dismiss", "icon", "icon-x");
+    dismiss.setAttribute("aria-label", "Clear plan");
+    dismiss.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.clearActivePlan(this.activePlanSessionId);
+    });
+
+    header.appendChild(twisty);
+    header.appendChild(title);
+    header.appendChild(count);
+    header.appendChild(dismiss);
+    header.addEventListener("click", () => {
+      this.planExpanded = !this.planExpanded;
+      this.renderPlanBar();
+    });
+    this.planBar.appendChild(header);
+
+    if (this.planExpanded) {
+      const body = document.createElement("div");
+      body.classList.add("pulsar-acp-agent-plan-bar-body");
+      this.appendPlanEntries(body, entries);
+      this.planBar.appendChild(body);
+    }
+  }
+
+  private appendPlanEntries(
+    container: HTMLElement,
+    entries: acp.PlanEntry[],
+  ): void {
+    const marks: Record<string, string> = {
+      pending: "\u25cb",
+      in_progress: "\u25d0",
+      completed: "\u2713",
+    };
     for (const entry of entries) {
       const row = document.createElement("div");
       row.classList.add("pulsar-acp-agent-plan-entry");
       row.dataset.status = entry.status;
-      const marks: Record<string, string> = {
-        pending: "\u25cb",
-        in_progress: "\u25d0",
-        completed: "\u2713",
-      };
-      const mark = marks[entry.status] || "\u25cb";
-      row.textContent = `${mark} ${entry.content}`;
-      this.planElement.appendChild(row);
+      row.textContent = `${marks[entry.status] || "\u25cb"} ${entry.content}`;
+      container.appendChild(row);
     }
-    if (!this.planElement.isConnected) {
-      this.conversation.appendChild(this.planElement);
+  }
+
+  private snapshotCompletedPlan(): void {
+    if (!completedPlanEntries(this.activePlanEntries)) {
+      return;
     }
+
+    const card = document.createElement("div");
+    card.classList.add(
+      "pulsar-acp-agent-plan",
+      "pulsar-acp-agent-plan--completed",
+    );
+    const heading = document.createElement("div");
+    heading.classList.add("pulsar-acp-agent-plan-heading");
+    heading.textContent = "Completed Plan";
+    card.appendChild(heading);
+    this.appendPlanEntries(card, this.activePlanEntries);
+    this.conversation.appendChild(card);
+
+    const sessionId = this.activePlanSessionId;
+    this.activePlanEntries = [];
+    this.activePlanSessionId = null;
+    if (sessionId) this.sessionPlanState.delete(sessionId);
+    this.renderPlanBar();
     this.scrollToBottom();
+  }
+
+  private clearCompletedActivePlanEntries(): void {
+    if (this.activePlanEntries.length === 0) return;
+    const entries = nextTurnActivePlanEntries(this.activePlanEntries);
+    if (entries.length === this.activePlanEntries.length) return;
+    this.setActivePlan(entries, this.session.sessionId);
   }
 
   private renderPermission(
@@ -2002,6 +2175,7 @@ export class PulsarAcpAgentView {
     result.then(({ deletedActive }) => {
       this.sessionConversationCache.delete(id);
       this.sessionLiveState.delete(id);
+      this.sessionPlanState.delete(id);
       if (deletedActive) {
         this.clearConversation();
         this.startNewSession();
