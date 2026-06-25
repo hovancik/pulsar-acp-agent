@@ -434,9 +434,88 @@
     margin-bottom: 4px;
   }
 
-  .pulsar-acp-agent-plan-entry[data-status="completed"] {
+  &.pulsar-acp-agent-plan--completed .pulsar-acp-agent-plan-heading {
     color: @text-color-subtle;
-    text-decoration: line-through;
+  }
+}
+
+.pulsar-acp-agent-plan-entry[data-status="completed"] {
+  color: @text-color-subtle;
+  text-decoration: line-through;
+}
+
+.pulsar-acp-agent-plan-entry[data-status="in_progress"] {
+  color: @text-color-highlight;
+}
+
+// Live plan: a pinned, collapsible bar above the composer (see Zed and VS
+// Code) so progress stays glanceable while the conversation scrolls.
+.pulsar-acp-agent-plan-bar {
+  border-top: 1px solid @pane-item-border-color;
+  background-color: @tool-panel-background-color;
+
+  .pulsar-acp-agent-plan-bar-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: (@component-padding / 2) @component-padding;
+    cursor: pointer;
+    user-select: none;
+
+    &:hover {
+      background-color: @background-color-highlight;
+    }
+  }
+
+  .pulsar-acp-agent-plan-bar-twisty {
+    flex-shrink: 0;
+    color: @text-color-subtle;
+
+    &::before {
+      margin: 0;
+    }
+  }
+
+  .pulsar-acp-agent-plan-bar-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .pulsar-acp-agent-plan-bar-count {
+    flex-shrink: 0;
+    color: @text-color-subtle;
+    font-size: 0.85em;
+  }
+
+  .pulsar-acp-agent-plan-bar-dismiss {
+    flex-shrink: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    color: @text-color-subtle;
+    cursor: pointer;
+
+    &::before {
+      margin: 0;
+    }
+
+    &:hover {
+      color: @text-color-highlight;
+    }
+  }
+
+  .pulsar-acp-agent-plan-bar-body {
+    max-height: 9rem;
+    overflow-y: auto;
+    padding: 0 @component-padding (@component-padding / 2);
+    line-height: 1.5;
+
+    .pulsar-acp-agent-plan-entry {
+      padding: 2px 0;
+    }
   }
 }
 

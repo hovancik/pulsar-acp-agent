@@ -51,6 +51,20 @@ export function configOptionLabel(option: acp.SessionConfigSelect): string {
   return match?.name || option.currentValue;
 }
 
+export type PlanLifecycleEntry = { status: acp.PlanEntryStatus };
+
+export function completedPlanEntries<T extends PlanLifecycleEntry>(
+  entries: T[],
+): boolean {
+  return entries.length > 0 && entries.every((entry) => entry.status === "completed");
+}
+
+export function nextTurnActivePlanEntries<T extends PlanLifecycleEntry>(
+  entries: T[],
+): T[] {
+  return entries.filter((entry) => entry.status !== "completed");
+}
+
 export type InfoRow = { key: string; value: string };
 
 export function flattenInfoRows(value: unknown): InfoRow[] {

@@ -100,6 +100,11 @@ dropdowns reflect whatever it reports back. Options are per-session.
 Tool calls, diffs and terminal output are rendered inline in the conversation,
 with long output collapsed behind a **Show more** toggle.
 
+When the agent reports an execution plan, a collapsible **Plan** bar appears
+above the input showing progress and the current step. It stays pinned while the
+conversation scrolls and can be dismissed; completed plans are snapshotted into
+the conversation.
+
 ![Agent tool output while working](docs/images/tool-output.png)
 
 After connection, a **Sessions** list is accessible via the history icon in the

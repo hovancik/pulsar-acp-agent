@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 // Imports the built bundle, not src/util.ts: tests run on Pulsar's Node (20.16,
 // per .nvmrc), which can't execute TypeScript. `npm run build` emits lib/util.js.
 import {
+  completedPlanEntries,
   configOptionLabel,
   flattenConfigSelectOptions,
   flattenInfoRows,
+  nextTurnActivePlanEntries,
   parseCommandLine,
   TerminalRecord,
 } from "../lib/util.js";
@@ -155,6 +157,43 @@ test("flattenConfigSelectOptions: flattens groups into a single list", () => {
     { value: "1", name: "One" },
     { value: "2", name: "Two" },
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// ACP plan lifecycle helpers
+// ---------------------------------------------------------------------------
+
+test("completedPlanEntries: only true for a non-empty fully completed plan", () => {
+  assert.equal(completedPlanEntries([]), false);
+  assert.equal(
+    completedPlanEntries([
+      { content: "A", priority: "high", status: "completed" },
+      { content: "B", priority: "medium", status: "completed" },
+    ]),
+    true,
+  );
+  assert.equal(
+    completedPlanEntries([
+      { content: "A", priority: "high", status: "completed" },
+      { content: "B", priority: "medium", status: "in_progress" },
+    ]),
+    false,
+  );
+});
+
+test("nextTurnActivePlanEntries: drops completed entries and keeps interrupted work", () => {
+  const pending = { content: "A", priority: "high", status: "pending" };
+  const inProgress = {
+    content: "B",
+    priority: "medium",
+    status: "in_progress",
+  };
+  const completed = { content: "C", priority: "low", status: "completed" };
+
+  assert.deepEqual(
+    nextTurnActivePlanEntries([completed, pending, inProgress]),
+    [pending, inProgress],
+  );
 });
 
 // ---------------------------------------------------------------------------
