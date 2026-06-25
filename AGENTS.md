@@ -29,6 +29,11 @@ drives the agent process and emits events → view renders them.
   possible, lay out the trade-offs and agree on a direction first. Before
   recommending an approach, check it's the current protocol mechanism and how
   Zed does it.
+- **Be a thinking colleague, not a yes-person.** Do not blindly agree with the
+  developer's suggestion. If an idea seems wrong, risky, overbuilt, inconsistent
+  with ACP/Pulsar, or not the smallest good fix, say so plainly and explain why.
+  Offer the better minimal path. Agree when the suggestion is sound; push back
+  only when there is a concrete reason.
 - **Be minimalistic.** Prefer the smallest change that fully solves the problem.
   Avoid new dependencies, abstractions, and configuration unless clearly needed.
   Keep commit messages, changelog entries, and doc updates short and direct — no filler words.
