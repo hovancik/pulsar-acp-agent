@@ -1,14 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 // Imports the built bundle, not src/util.ts: tests run on Pulsar's Node (20.16,
 // per .nvmrc), which can't execute TypeScript. `npm run build` emits lib/util.js.
 import {
+  buildContextBlock,
   completedPlanEntries,
   configOptionLabel,
+  fileUri,
   flattenConfigSelectOptions,
   flattenInfoRows,
   nextTurnActivePlanEntries,
   parseCommandLine,
+  selectionLineRange,
   TerminalRecord,
 } from "../lib/util.js";
 
@@ -251,4 +256,82 @@ test("TerminalRecord: the first exit status wins", () => {
   record.resolveExit({ exitCode: 0, signal: null });
   record.resolveExit({ exitCode: 1, signal: "SIGKILL" });
   assert.deepEqual(record.exitStatus, { exitCode: 0, signal: null });
+});
+
+// ---------------------------------------------------------------------------
+// selectionLineRange (0-based exclusive buffer range -> 1-based inclusive lines)
+// ---------------------------------------------------------------------------
+
+test("selectionLineRange: single-line selection", () => {
+  assert.deepEqual(
+    selectionLineRange({ start: { row: 3, column: 2 }, end: { row: 3, column: 8 } }),
+    { start: 4, end: 4 },
+  );
+});
+
+test("selectionLineRange: one whole line ending at column 0 of the next", () => {
+  assert.deepEqual(
+    selectionLineRange({ start: { row: 3, column: 0 }, end: { row: 4, column: 0 } }),
+    { start: 4, end: 4 },
+  );
+});
+
+test("selectionLineRange: multi-line mid-line end", () => {
+  assert.deepEqual(
+    selectionLineRange({ start: { row: 3, column: 2 }, end: { row: 6, column: 5 } }),
+    { start: 4, end: 7 },
+  );
+});
+
+test("selectionLineRange: multi-line ending at column 0 drops trailing line", () => {
+  assert.deepEqual(
+    selectionLineRange({ start: { row: 3, column: 2 }, end: { row: 6, column: 0 } }),
+    { start: 4, end: 6 },
+  );
+});
+
+test("selectionLineRange: empty selection returns null", () => {
+  assert.equal(
+    selectionLineRange({ start: { row: 3, column: 2 }, end: { row: 3, column: 2 } }),
+    null,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// fileUri
+// ---------------------------------------------------------------------------
+
+test("fileUri: no range returns the bare file URL", () => {
+  const abs = path.resolve("dir", "file.ts");
+  assert.equal(fileUri(abs), pathToFileURL(abs).href);
+});
+
+test("fileUri: single line appends #L{n}", () => {
+  const abs = path.resolve("dir", "file.ts");
+  assert.equal(fileUri(abs, { start: 5, end: 5 }), pathToFileURL(abs).href + "#L5");
+});
+
+test("fileUri: multi-line appends #L{start}:{end}", () => {
+  const abs = path.resolve("dir", "file.ts");
+  assert.equal(fileUri(abs, { start: 5, end: 9 }), pathToFileURL(abs).href + "#L5:9");
+});
+
+test("fileUri: encodes spaces and non-ASCII but keeps the fragment literal", () => {
+  const abs = path.resolve("a b", "r\u00e9sum\u00e9.ts");
+  const uri = fileUri(abs, { start: 3, end: 7 });
+  assert.ok(uri.startsWith("file://"));
+  assert.ok(uri.includes("%20"));
+  assert.ok(!uri.includes(" "));
+  assert.equal(uri, pathToFileURL(abs).href + "#L3:7");
+});
+
+// ---------------------------------------------------------------------------
+// buildContextBlock
+// ---------------------------------------------------------------------------
+
+test("buildContextBlock: builds an embedded text resource without mimeType", () => {
+  assert.deepEqual(buildContextBlock({ uri: "file:///x#L1", text: "hello" }), {
+    type: "resource",
+    resource: { uri: "file:///x#L1", text: "hello" },
+  });
 });

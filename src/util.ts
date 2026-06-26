@@ -1,4 +1,5 @@
 import { ChildProcess } from "child_process";
+import { pathToFileURL } from "url";
 import spawn from "cross-spawn";
 import * as acp from "@agentclientprotocol/sdk";
 
@@ -31,6 +32,63 @@ export function parseCommandLine(line: string): string[] {
   }
   if (hasToken) tokens.push(current);
   return tokens;
+}
+
+// A 1-based, inclusive line range within a file. Callers convert from Atom's
+// 0-based, end-exclusive buffer ranges via `selectionLineRange` so this module
+// stays editor-agnostic.
+export type LineRange = { start: number; end: number };
+
+// A 0-based, end-exclusive buffer range, shaped like Atom's `getBufferRange()`
+// result but with plain numbers so it can be tested without `atom`.
+export type BufferRange = {
+  start: { row: number; column: number };
+  end: { row: number; column: number };
+};
+
+// Converts a 0-based, end-exclusive buffer range to a 1-based, inclusive line
+// range for a URI fragment, or null when the range is empty. A selection ending
+// at column 0 of a later line covers whole lines, so the trailing empty line is
+// dropped (e.g. [3,0]-[4,0] is line 4 only, not lines 4-5).
+export function selectionLineRange(range: BufferRange): LineRange | null {
+  if (
+    range.start.row === range.end.row &&
+    range.start.column === range.end.column
+  ) {
+    return null;
+  }
+  const start = range.start.row + 1;
+  const end =
+    range.end.column === 0 && range.end.row > range.start.row
+      ? range.end.row
+      : range.end.row + 1;
+  return { start, end };
+}
+
+// Builds a `file://` URI for an absolute path, optionally appending a 1-based
+// inclusive line-range fragment (`L5` for one line, `L5:9` for a span). The
+// fragment is appended to the already-encoded href as plain text; the `#` is
+// never passed through `pathToFileURL`, which would percent-encode it.
+export function fileUri(absolutePath: string, range?: LineRange): string {
+  const href = pathToFileURL(absolutePath).href;
+  if (!range) return href;
+  const fragment =
+    range.end > range.start ? `L${range.start}:${range.end}` : `L${range.start}`;
+  return `${href}#${fragment}`;
+}
+
+// A materialized piece of editor context, ready to inline into a prompt.
+export type ContextAttachment = { uri: string; text: string };
+
+// Assembles an ACP embedded-resource content block for attached editor context.
+// The text is inlined (so unsaved edits and out-of-tree files work without the
+// agent re-reading), and `mimeType` is omitted to match Zed. Capability gating
+// on `promptCapabilities.embeddedContext` is the caller's responsibility.
+export function buildContextBlock(attachment: ContextAttachment): acp.ContentBlock {
+  return {
+    type: "resource",
+    resource: { uri: attachment.uri, text: attachment.text },
+  };
 }
 
 // Config-option choices may arrive flat or grouped; flatten to one ordered list.

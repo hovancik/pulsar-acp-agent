@@ -1,4 +1,6 @@
-import { CompositeDisposable, Disposable } from "atom";
+import { CompositeDisposable, Disposable, TextEditor } from "atom";
+import * as fs from "fs";
+import * as path from "path";
 import * as acp from "@agentclientprotocol/sdk";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -13,9 +15,11 @@ import {
 import {
   completedPlanEntries,
   configOptionLabel,
+  fileUri,
   flattenConfigSelectOptions,
   flattenInfoRows,
   nextTurnActivePlanEntries,
+  selectionLineRange,
 } from "./util";
 
 marked.setOptions({ breaks: true });
@@ -100,6 +104,29 @@ type ToolView = {
 };
 
 type PendingImage = { id: number; data: string; mimeType: string; file: File };
+
+type ContextKind = "file" | "selection";
+
+// A staged editor-context attachment shown as a chip below the input. For a
+// file we hold the editor ref and re-read its text at send (capturing unsaved
+// edits); for a selection we snapshot the selected text at attach time.
+type PendingContext = {
+  id: number;
+  kind: ContextKind;
+  uri: string;
+  label: string;
+  path: string;
+  editor?: TextEditor;
+  text?: string;
+};
+
+// An attachment that survived send-time validation, ready to inline and echo.
+type MaterializedContext = {
+  uri: string;
+  text: string;
+  kind: ContextKind;
+  label: string;
+};
 
 const STDERR_LIMIT = 4000;
 
@@ -205,6 +232,8 @@ class ConfigSelector {
         atom.tooltips.add(this.button, {
           title: option.description,
           html: false,
+          placement: "top",
+          trigger: "hover",
           class: "pulsar-acp-agent-tooltip",
         }),
       );
@@ -228,6 +257,7 @@ class ConfigSelector {
           atom.tooltips.add(item, {
             title: choice.description,
             html: false,
+            placement: "left",
             class: "pulsar-acp-agent-tooltip",
           }),
         );
@@ -291,7 +321,6 @@ export class PulsarAcpAgentView {
   private agentExited = false;
   private input!: HTMLTextAreaElement;
   private fileInput!: HTMLInputElement;
-  private attachButton!: HTMLButtonElement;
   private thumbnailStrip!: HTMLElement;
   private conversation!: HTMLElement;
   private conversationWrapper!: HTMLElement;
@@ -324,6 +353,17 @@ export class PulsarAcpAgentView {
   private preparingPrompt = false;
   private imageSupportKnown = false;
   private supportsImages = false;
+  private pendingContext: PendingContext[] = [];
+  private nextContextId = 1;
+  private contextStrip!: HTMLElement;
+  private contextTooltips = new CompositeDisposable();
+  private contextControl!: HTMLElement;
+  private contextMenu!: HTMLElement;
+  private contextTrigger!: HTMLButtonElement;
+  private contextMenuVisible = false;
+  private addImageItem!: HTMLButtonElement;
+  private addSelectionItem!: HTMLButtonElement;
+  private addFileItem!: HTMLButtonElement;
   private startObserver: IntersectionObserver | null = null;
   private startAttempted = false;
   private reporter: AgentStatusReporter | null;
@@ -641,6 +681,10 @@ export class PulsarAcpAgentView {
     this.thumbnailStrip.classList.add("pulsar-acp-agent-thumbnails");
     this.thumbnailStrip.style.display = "none";
 
+    this.contextStrip = document.createElement("div");
+    this.contextStrip.classList.add("pulsar-acp-agent-context-strip");
+    this.contextStrip.style.display = "none";
+
     this.fileInput = document.createElement("input");
     this.fileInput.type = "file";
     this.fileInput.accept = SUPPORTED_IMAGE_ACCEPT;
@@ -704,21 +748,6 @@ export class PulsarAcpAgentView {
 
     const actions = document.createElement("div");
     actions.classList.add("pulsar-acp-agent-actions");
-    this.attachButton = document.createElement("button");
-    this.attachButton.classList.add(
-      "btn",
-      "icon",
-      "icon-file-media",
-      "pulsar-acp-agent-attach",
-    );
-    this.attachButton.setAttribute("aria-label", "Attach image");
-    this.attachButton.style.display = "none";
-    this.subscriptions.add(
-      atom.tooltips.add(this.attachButton, {
-        title: "Attach image (or drag-and-drop / paste)",
-      }),
-    );
-    this.attachButton.addEventListener("click", () => this.fileInput.click());
     this.sendButton = this.makeButton("Send", () => this.send());
     this.sendButton.classList.add("pulsar-acp-agent-send");
     this.stopButton = this.makeButton("Stop", () => {
@@ -744,16 +773,21 @@ export class PulsarAcpAgentView {
           "Auto-approve permission prompts for this session using allow once.",
       }),
     );
+    actions.appendChild(this.buildContextControl());
     actions.appendChild(this.buildConfigSelectors());
-    actions.appendChild(this.attachButton);
-    actions.appendChild(this.autoApproveButton);
-    actions.appendChild(this.stopButton);
-    actions.appendChild(this.sendButton);
+
+    const actionButtons = document.createElement("div");
+    actionButtons.classList.add("pulsar-acp-agent-action-buttons");
+    actionButtons.appendChild(this.autoApproveButton);
+    actionButtons.appendChild(this.stopButton);
+    actionButtons.appendChild(this.sendButton);
 
     footer.appendChild(this.fileInput);
+    footer.appendChild(this.contextStrip);
     footer.appendChild(this.thumbnailStrip);
     footer.appendChild(this.input);
     footer.appendChild(actions);
+    footer.appendChild(actionButtons);
 
     this.element.appendChild(header);
     this.element.appendChild(this.infoPanel);
@@ -858,7 +892,10 @@ export class PulsarAcpAgentView {
           this.settingConfig.has(
             configLockKey(this.session.sessionId, configId),
           ),
-        () => this.closeAllConfigMenus(),
+        () => {
+          this.closeAllConfigMenus();
+          this.closeContextMenu();
+        },
       );
       selector.render(option);
       this.configSelectors.push(selector);
@@ -1058,7 +1095,9 @@ export class PulsarAcpAgentView {
   private async sendPrompt(): Promise<void> {
     const text = this.input.value.trim();
     if (
-      (text.length === 0 && this.pendingImages.length === 0) ||
+      (text.length === 0 &&
+        this.pendingImages.length === 0 &&
+        this.pendingContext.length === 0) ||
       this.session.running ||
       this.session.switching ||
       this.preparingPrompt ||
@@ -1087,9 +1126,10 @@ export class PulsarAcpAgentView {
     const currentSession = this.session;
     this.preparingPrompt = true;
     this.updateInputControls();
+    let context: MaterializedContext[] = [];
     try {
       await this.session.start(target);
-      if (this.session !== currentSession) return;
+      if (this.session !== currentSession || !this.preparingPrompt) return;
       if (this.pendingImages.length > 0 && !this.session.supportsImages()) {
         this.appendError(
           "The configured agent does not support image prompts; images were not sent.",
@@ -1098,6 +1138,8 @@ export class PulsarAcpAgentView {
         this.clearThumbnails();
         return;
       }
+      context = await this.materializePendingContext();
+      if (this.session !== currentSession || !this.preparingPrompt) return;
     } catch (error) {
       if (this.session === currentSession) {
         this.appendError(
@@ -1114,12 +1156,14 @@ export class PulsarAcpAgentView {
     }
 
     const images = this.pendingImages.splice(0);
+    if (text.length === 0 && images.length === 0 && context.length === 0)
+      return;
     this.input.value = "";
     this.clearThumbnails();
-    this.appendUserMessage(text, images);
+    this.appendUserMessage(text, images, context);
     this.endStreamingBlocks();
     this.sendButton.disabled = true;
-    this.session.prompt(text, images).catch((error) => {
+    this.session.prompt(text, images, context).catch((error) => {
       if (this.session !== currentSession) return;
       this.appendError(error.message || String(error));
       this.setAgentStatus("error");
@@ -1141,7 +1185,7 @@ export class PulsarAcpAgentView {
     this.clearConversation();
     this.imageSupportKnown = false;
     this.supportsImages = false;
-    this.attachButton.style.display = "none";
+    this.contextControl.style.display = "none";
     this.resetAgentChrome();
     this.resetSessionsChrome();
     this.setAgentStatus("idle");
@@ -1401,6 +1445,7 @@ export class PulsarAcpAgentView {
     this.imageLoadGeneration++;
     this.preparingPrompt = false;
     this.clearThumbnails();
+    this.clearContext();
     this.endStreamingBlocks();
     this.stickToBottom = true;
     this.generatingIndicator = null;
@@ -1554,7 +1599,10 @@ export class PulsarAcpAgentView {
         this.setAgentStatus("connecting");
         this.imageSupportKnown = true;
         this.supportsImages = event.supportsImages;
-        this.attachButton.style.display = event.supportsImages ? "" : "none";
+        this.contextControl.style.display =
+          event.supportsImages || this.session.supportsEmbeddedContext()
+            ? ""
+            : "none";
         this.updateInputControls();
         break;
       case "ready":
@@ -1807,6 +1855,7 @@ export class PulsarAcpAgentView {
   private appendUserMessage(
     text: string,
     images: PendingImage[],
+    context: MaterializedContext[] = [],
   ): void {
     const body = this.appendMessage("user", text);
     this.renderMarkdown(body, text);
@@ -1816,6 +1865,14 @@ export class PulsarAcpAgentView {
           this.scrollToBottom(),
         ),
       );
+    }
+    if (context.length > 0) {
+      const strip = document.createElement("div");
+      strip.classList.add("pulsar-acp-agent-message-context");
+      for (const item of context) {
+        strip.appendChild(this.makeContextChip(item.kind, item.label));
+      }
+      body.appendChild(strip);
     }
   }
 
@@ -1901,6 +1958,389 @@ export class PulsarAcpAgentView {
     this.thumbnailStrip.style.display = "none";
   }
 
+  // --- Prompt context menu -------------------------------------------------
+  // One "Attach to prompt" button in the actions row whose items stage prompt
+  // content: Image (routes to the image file picker), Selection, and File. The
+  // editor commands in main.ts feed the same addSelectionContext /
+  // addActiveFileContext path. Items are shown only when the agent advertises
+  // the matching capability and greyed when not currently applicable; staged
+  // chips are validated again at send (materializePendingContext).
+
+  private buildContextControl(): HTMLElement {
+    const wrapper = document.createElement("div");
+    wrapper.classList.add("pulsar-acp-agent-config", "pulsar-acp-agent-context");
+    wrapper.style.display = "none";
+    this.contextControl = wrapper;
+
+    const menu = document.createElement("div");
+    menu.classList.add("pulsar-acp-agent-config-menu");
+    menu.setAttribute("role", "menu");
+    menu.style.display = "none";
+    this.contextMenu = menu;
+
+    this.addImageItem = this.makeContextMenuItem(
+      "Image",
+      "icon-file-media",
+      () => {
+        this.fileInput.click();
+      },
+    );
+    this.addSelectionItem = this.makeContextMenuItem(
+      "Current selection",
+      "icon-code",
+      () => {
+        void this.addSelectionContext(
+          atom.workspace.getCenter().getActiveTextEditor(),
+        );
+      },
+    );
+    this.addFileItem = this.makeContextMenuItem(
+      "Current file",
+      "icon-file",
+      () => {
+        void this.addActiveFileContext(
+          atom.workspace.getCenter().getActiveTextEditor(),
+        );
+      },
+    );
+    menu.appendChild(this.addImageItem);
+    menu.appendChild(this.addSelectionItem);
+    menu.appendChild(this.addFileItem);
+
+    const trigger = document.createElement("button");
+    trigger.classList.add(
+      "btn",
+      "icon",
+      "icon-plus",
+      "pulsar-acp-agent-context-trigger",
+    );
+    trigger.setAttribute("aria-label", "Attach to prompt");
+    trigger.setAttribute("aria-haspopup", "true");
+    trigger.setAttribute("aria-expanded", "false");
+    this.subscriptions.add(
+      atom.tooltips.add(trigger, {
+        title: "Attach to prompt",
+        placement: "top",
+        trigger: "hover",
+      }),
+    );
+    trigger.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.toggleContextMenu();
+    });
+    this.contextTrigger = trigger;
+
+    wrapper.appendChild(menu);
+    wrapper.appendChild(trigger);
+
+    const onDocClick = (event: MouseEvent) => {
+      if (this.contextMenuVisible && !wrapper.contains(event.target as Node))
+        this.closeContextMenu();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && this.contextMenuVisible) {
+        this.closeContextMenu();
+        trigger.focus();
+      }
+    };
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    this.subscriptions.add({
+      dispose: () => {
+        document.removeEventListener("click", onDocClick);
+        document.removeEventListener("keydown", onKeyDown);
+      },
+    });
+
+    return wrapper;
+  }
+
+  private makeContextMenuItem(
+    label: string,
+    iconClass: string,
+    onClick: () => void,
+  ): HTMLButtonElement {
+    const item = document.createElement("button");
+    item.classList.add("pulsar-acp-agent-config-item");
+    item.setAttribute("role", "menuitem");
+    const icon = document.createElement("span");
+    icon.classList.add("icon", iconClass);
+    item.appendChild(icon);
+    const name = document.createElement("span");
+    name.classList.add("pulsar-acp-agent-config-name");
+    name.textContent = label;
+    item.appendChild(name);
+    item.addEventListener("click", () => {
+      this.closeContextMenu();
+      onClick();
+    });
+    return item;
+  }
+
+  private toggleContextMenu(): void {
+    if (this.contextMenuVisible) this.closeContextMenu();
+    else this.openContextMenu();
+  }
+
+  private openContextMenu(): void {
+    if (this.contextTrigger.disabled) return;
+    this.closeAllConfigMenus();
+    this.refreshContextMenuItems();
+    this.contextMenuVisible = true;
+    this.contextMenu.style.display = "";
+    this.contextTrigger.setAttribute("aria-expanded", "true");
+  }
+
+  private closeContextMenu(): void {
+    if (!this.contextMenuVisible) return;
+    this.contextMenuVisible = false;
+    this.contextMenu.style.display = "none";
+    this.contextTrigger.setAttribute("aria-expanded", "false");
+  }
+
+  private refreshContextMenuItems(): void {
+    const editor = atom.workspace.getCenter().getActiveTextEditor();
+    const hasFile = !!editor && !!editor.getPath();
+    const embedded = this.session.supportsEmbeddedContext();
+
+    this.addImageItem.style.display = this.supportsImages ? "" : "none";
+    this.addImageItem.disabled = !this.canAcceptImages();
+
+    this.addSelectionItem.style.display = embedded ? "" : "none";
+    this.addSelectionItem.disabled =
+      !hasFile || !editor || !this.lastNonEmptySelection(editor);
+
+    this.addFileItem.style.display = embedded ? "" : "none";
+    this.addFileItem.disabled = !hasFile;
+  }
+
+  // Stage the whole active file. Best-effort guards (untitled, in project) warn
+  // and refuse here; the binding checks run again at send.
+  async addActiveFileContext(
+    editor: TextEditor | null | undefined,
+  ): Promise<void> {
+    if (!editor) {
+      this.appendError("No active editor to attach.");
+      return;
+    }
+    if (this.session.sessionId != null && !this.session.supportsEmbeddedContext()) {
+      this.appendError(
+        "The configured agent does not support embedded context.",
+      );
+      return;
+    }
+    const filePath = editor.getPath();
+    if (!filePath) {
+      this.appendError("Save the file before attaching it as context.");
+      return;
+    }
+    const uri = fileUri(filePath);
+    if (this.pendingContext.some((c) => c.uri === uri)) return;
+    if (!(await this.session.isPathInProjectRoots(filePath))) {
+      this.appendError(
+        `"${path.basename(filePath)}" is outside the project and was not attached.`,
+      );
+      return;
+    }
+    const context: PendingContext = {
+      id: this.nextContextId++,
+      kind: "file",
+      uri,
+      label: path.basename(filePath),
+      path: filePath,
+      editor,
+    };
+    this.pendingContext.push(context);
+    this.renderContextChip(context);
+  }
+
+  // Stage a snapshot of the last non-empty selection: its text plus the 1-based
+  // inclusive line range from selectionLineRange (off-by-one details in util.ts).
+  async addSelectionContext(
+    editor: TextEditor | null | undefined,
+  ): Promise<void> {
+    if (!editor) {
+      this.appendError("No active editor to attach.");
+      return;
+    }
+    if (this.session.sessionId != null && !this.session.supportsEmbeddedContext()) {
+      this.appendError(
+        "The configured agent does not support embedded context.",
+      );
+      return;
+    }
+    const filePath = editor.getPath();
+    if (!filePath) {
+      this.appendError("Save the file before attaching a selection.");
+      return;
+    }
+    const selection = this.lastNonEmptySelection(editor);
+    if (!selection) {
+      this.appendError("Select some text to attach a selection.");
+      return;
+    }
+    const lineRange = selectionLineRange(selection.getBufferRange());
+    // lastNonEmptySelection already excluded empty selections; this narrows the
+    // nullable result for the URI and label below.
+    if (!lineRange) return;
+    const uri = fileUri(filePath, lineRange);
+    if (this.pendingContext.some((c) => c.uri === uri)) return;
+    if (!(await this.session.isPathInProjectRoots(filePath))) {
+      this.appendError(
+        `"${path.basename(filePath)}" is outside the project and was not attached.`,
+      );
+      return;
+    }
+    const name = path.basename(filePath);
+    const label =
+      lineRange.end > lineRange.start
+        ? `${name}:${lineRange.start}-${lineRange.end}`
+        : `${name}:${lineRange.start}`;
+    const context: PendingContext = {
+      id: this.nextContextId++,
+      kind: "selection",
+      uri,
+      label,
+      path: filePath,
+      text: selection.getText(),
+    };
+    this.pendingContext.push(context);
+    this.renderContextChip(context);
+  }
+
+  private lastNonEmptySelection(editor: TextEditor) {
+    const last = editor.getLastSelection();
+    if (last && !last.isEmpty()) return last;
+    const selections = editor.getSelections();
+    for (let i = selections.length - 1; i >= 0; i--) {
+      if (!selections[i].isEmpty()) return selections[i];
+    }
+    return undefined;
+  }
+
+  private makeContextChip(kind: ContextKind, label: string): HTMLElement {
+    const chip = document.createElement("span");
+    chip.classList.add("pulsar-acp-agent-context-chip");
+    const icon = document.createElement("span");
+    icon.classList.add("icon", kind === "selection" ? "icon-code" : "icon-file");
+    chip.appendChild(icon);
+    const labelEl = document.createElement("span");
+    labelEl.classList.add("pulsar-acp-agent-context-label");
+    labelEl.textContent = label;
+    chip.appendChild(labelEl);
+    return chip;
+  }
+
+  private renderContextChip(context: PendingContext): void {
+    this.contextStrip.style.display = "";
+    const chip = this.makeContextChip(context.kind, context.label);
+    const chipTip = atom.tooltips.add(chip, {
+      title:
+        context.kind === "selection"
+          ? `Selection from ${context.path}`
+          : context.path,
+    });
+    this.contextTooltips.add(chipTip);
+    const remove = document.createElement("button");
+    remove.classList.add("pulsar-acp-agent-context-remove");
+    remove.textContent = "\u00d7";
+    remove.setAttribute("aria-label", "Remove context");
+    const tip = atom.tooltips.add(remove, { title: "Remove context" });
+    this.contextTooltips.add(tip);
+    remove.addEventListener("click", () => {
+      this.contextTooltips.remove(chipTip);
+      chipTip.dispose();
+      this.contextTooltips.remove(tip);
+      tip.dispose();
+      const idx = this.pendingContext.findIndex((c) => c.id === context.id);
+      if (idx >= 0) this.pendingContext.splice(idx, 1);
+      chip.remove();
+      if (this.contextStrip.children.length === 0)
+        this.contextStrip.style.display = "none";
+    });
+    chip.appendChild(remove);
+    this.contextStrip.appendChild(chip);
+  }
+
+  private clearContext(): void {
+    this.contextTooltips.dispose();
+    this.contextTooltips = new CompositeDisposable();
+    this.contextStrip.innerHTML = "";
+    this.contextStrip.style.display = "none";
+    this.pendingContext = [];
+  }
+
+  // Resolve staged attachments to embedded-resource payloads at send time. The
+  // active file is re-read (held editor → any open editor for the path → disk)
+  // so unsaved edits are captured; the in-project check here is authoritative
+  // (attach-time checks are best-effort). Consumes the chips and returns one
+  // entry per attachment that survived, dropping + warning on the rest
+  // (unsupported capability, unreadable, out-of-project).
+  private async materializePendingContext(): Promise<MaterializedContext[]> {
+    const pending = this.pendingContext;
+    this.clearContext();
+    if (pending.length === 0) return [];
+    if (!this.session.supportsEmbeddedContext()) {
+      this.appendError(
+        "The configured agent does not support embedded context; attachments were not sent.",
+      );
+      return [];
+    }
+    const materialized: MaterializedContext[] = [];
+    for (const context of pending) {
+      if (!(await this.session.isPathInProjectRoots(context.path))) {
+        this.appendError(
+          `"${context.label}" is outside the project and was not sent.`,
+        );
+        continue;
+      }
+      const raw =
+        context.kind === "file"
+          ? await this.materializeFileContext(context)
+          : (context.text ?? null);
+      if (raw == null) {
+        this.appendError(`"${context.label}" could not be read and was not sent.`);
+        continue;
+      }
+      const text = raw.replace(/\r\n/g, "\n");
+      materialized.push({
+        uri: context.uri,
+        text,
+        kind: context.kind,
+        label: context.label,
+      });
+    }
+    return materialized;
+  }
+
+  private async materializeFileContext(
+    context: PendingContext,
+  ): Promise<string | null> {
+    const held =
+      context.editor && !context.editor.isDestroyed()
+        ? context.editor
+        : undefined;
+    if (held) {
+      const heldPath = held.getPath();
+      if (heldPath && this.samePath(heldPath, context.path))
+        return held.getText();
+    }
+    const open = atom.workspace.getTextEditors().find((item) => {
+      const itemPath = item.getPath();
+      return itemPath != null && this.samePath(itemPath, context.path);
+    });
+    if (open) return open.getText();
+    try {
+      return await fs.promises.readFile(context.path, "utf8");
+    } catch {
+      return null;
+    }
+  }
+
+  private samePath(a: string, b: string): boolean {
+    return path.relative(path.resolve(a), path.resolve(b)) === "";
+  }
+
   // ponytail: canvas, not <img src=blob:/data:>, to avoid the CodeQL
   // untrusted-URL-in-sink alert for user-selected images (see c29f767).
   // Don't "simplify" this back to an <img>.
@@ -1958,7 +2398,7 @@ export class PulsarAcpAgentView {
       this.session.switching ||
       this.preparingPrompt;
     this.sendButton.disabled = busy || this.pendingImageLoads > 0;
-    this.attachButton.disabled = busy || !this.canAcceptImages();
+    this.contextTrigger.disabled = busy;
     this.updateConfigSelectorsDisabled();
   }
 
@@ -2777,6 +3217,7 @@ export class PulsarAcpAgentView {
     this.reporter?.clear(this);
     this.sessionTooltips.dispose();
     this.thumbnailTooltips.dispose();
+    this.contextTooltips.dispose();
     for (const selector of this.configSelectors) selector.dispose();
     this.configSelectors = [];
     this.subscriptions.dispose();

@@ -2,6 +2,9 @@
 
 Guidance for AI agents and contributors working on this package.
 
+For the end-to-end feature/fix workflow, see the `feature-dev` skill at
+`.github/skills/feature-dev/SKILL.md`.
+
 ## Architecture
 
 Five `src/` modules, bundled to `lib/` by `build.mjs` (esbuild):
