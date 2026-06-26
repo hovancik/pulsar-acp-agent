@@ -89,10 +89,24 @@ included in prompts.
 
 ![Pulsar ACP Agent chat panel in Pulsar](docs/images/panel-idle.png)
 
-If the agent advertises image prompt support, attach PNG, JPEG, GIF, or WebP
-images up to 5 MiB via the attachment button, drag-and-drop, or paste.
+Attach prompt content from the composer's **Attach to prompt** button. Its menu
+offers:
+
+- **Image** — pick a PNG, JPEG, GIF, or WebP image up to 5 MiB (you can also
+  drag-and-drop or paste images straight into the input); shown when the agent
+  advertises image prompt support.
+- **Current selection** — attach the current editor selection.
+- **Current file** — attach the active editor file.
 
 ![Image attachment preview before sending a prompt](docs/images/image-attachment.png)
+
+Selection and File are shown when the agent advertises embedded-context support,
+and are also available from the editor right-click menu and the commands
+`Pulsar ACP Agent: Add Active File to Prompt` and
+`Pulsar ACP Agent: Add Selection to Prompt`. Attachments appear as removable
+chips above the input and are sent inline as ACP `resource` blocks (the active
+file is re-read when you send, so unsaved edits are included). The file must be
+inside the open project.
 
 Once connected, click **More...** in the header to show or hide the agent's
 self-reported name, version, advertised capabilities, and metadata as key/value

@@ -58,9 +58,9 @@ terminal whose output is shown in the panel.
 
 | ACP feature | Status | Notes |
 | --- | --- | --- |
-| Text prompts (`session/prompt`) | ✅ | We send a single `text` content block per turn. |
-| Rich prompt content — `image`, `audio`, `resource`, `resource_link` | 🟡 | Outgoing image attachments via file picker, drag-and-drop, and paste are supported when the agent advertises `promptCapabilities.image`. `audio`, `resource`, and `resource_link` outgoing blocks are not yet sent. |
-| `@`-mention / embedded context | ⬜ | Reference files or symbols in a prompt as resource blocks. |
+| Text prompts (`session/prompt`) | ✅ | We send a `text` block per turn (skipped when the message is empty), followed by any attached image and embedded-context blocks. |
+| Rich prompt content — `image`, `audio`, `resource`, `resource_link` | 🟡 | Outgoing image attachments (file picker, drag-and-drop, paste) when the agent advertises `promptCapabilities.image`, and embedded `resource` blocks for the active file / selection when it advertises `promptCapabilities.embeddedContext`. `audio` and `resource_link` outgoing blocks are not yet sent. |
+| `@`-mention / embedded context | 🟡 | Attach the active file or current selection as embedded `resource` blocks from the composer's **Attach to prompt** button or the editor context menu. Inline `@`-mention autocomplete and a file/symbol picker are not yet implemented. |
 | Incoming content rendering | 🟡 | `text` and `resource_link` render fully; `image` / `audio` / `resource` show as placeholders (`[image]`, …). |
 
 ## Streaming updates (`session/update`)
@@ -101,7 +101,7 @@ terminal whose output is shown in the panel.
 ## Suggested priorities
 
 1. **Slash commands** (`available_commands_update`) — cheap, high-value UX; surfaces agent-native commands.
-2. **Rich prompt content** — attach the current file/selection or images.
+2. **`@`-mention autocomplete** — reference files/symbols inline; today the whole active file or current selection is attached via the **Attach to prompt** button or the editor context menu.
 3. **Boolean config options** — render the `boolean` config option kind; only `select` is surfaced today.
 4. **Logout** — account switching without a restart.
 5. **Session close** — free agent-side resources when leaving a session.

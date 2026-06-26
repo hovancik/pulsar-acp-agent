@@ -747,31 +747,60 @@
   .pulsar-acp-agent-input {
     width: 100%;
     resize: vertical;
+    padding: (@component-padding / 2);
     font-family: inherit;
     background-color: @input-background-color;
     color: @text-color;
     border: 1px solid @input-border-color;
     border-radius: @component-border-radius;
+
+    &:focus {
+      outline: none;
+      border-color: @text-color-info;
+    }
   }
 
   .pulsar-acp-agent-actions {
     display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: (@component-padding / 2);
+    margin-top: (@component-padding / 2);
+  }
+
+  .pulsar-acp-agent-action-buttons {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
     justify-content: flex-end;
     gap: (@component-padding / 2);
     margin-top: (@component-padding / 2);
   }
 }
 
-.pulsar-acp-agent-auto-approve {
+// Secondary footer controls (config dropdowns, add-context, permissions, stop)
+// share one low-chrome "ghost" look so Send is the only emphasized action.
+.pulsar-acp-agent-config-trigger,
+.pulsar-acp-agent-context-trigger,
+.pulsar-acp-agent-auto-approve,
+.pulsar-acp-agent-stop {
   font-size: 0.85em;
-  opacity: 0.7;
+  background: none;
+  border: 1px solid transparent;
+  color: @text-color-subtle;
 
-  &:hover {
-    opacity: 1;
+  &:hover:not(:disabled) {
+    color: @text-color;
+    background-color: @background-color-highlight;
   }
+}
+
+.pulsar-acp-agent-auto-approve {
+  // First control of the button row; pushes Stop and Send to the right while it
+  // stays on the left.
+  margin-right: auto;
 
   &.pulsar-acp-agent-auto-approve--on {
-    opacity: 1;
     color: @text-color-warning;
     border-color: @text-color-warning;
     background-color: fade(@text-color-warning, 10%);
@@ -782,14 +811,22 @@
   }
 }
 
+.pulsar-acp-agent-send {
+  color: @text-color-highlight;
+  background-color: @background-color-info;
+  border-color: transparent;
+
+  &:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+}
+
 // Session config option dropdowns (model, agent, reasoning effort, …) from the
-// ACP configOptions array. Grouped left in the actions row; the auto margin
-// keeps the other action buttons right-aligned.
+// ACP configOptions array, grouped at the left of the actions row.
 .pulsar-acp-agent-config-selectors {
   display: flex;
   flex-wrap: wrap;
   gap: (@component-padding / 2);
-  margin-right: auto;
 }
 
 .pulsar-acp-agent-config {
@@ -797,20 +834,13 @@
 }
 
 .pulsar-acp-agent-config-trigger {
-  font-size: 0.85em;
-  opacity: 0.7;
-
-  &:hover {
-    opacity: 1;
-  }
-
   &::after {
     content: " \25be";
     opacity: 0.9;
   }
 
   &[aria-expanded="true"] {
-    opacity: 1;
+    color: @text-color;
   }
 }
 
@@ -866,6 +896,15 @@
     padding-left: @component-padding;
     color: @text-color-info;
   }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.4;
+
+    &:hover {
+      background: none;
+    }
+  }
 }
 
 .pulsar-acp-agent-thumbnails {
@@ -911,6 +950,62 @@
   max-height: 300px;
   margin-top: (@component-padding / 2);
   border-radius: @component-border-radius;
+}
+
+// Staged editor-context attachments (active file / selection) shown as pills
+// above the input, and echoed metadata-only inside the sent user message.
+.pulsar-acp-agent-context-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: (@component-padding / 2);
+  padding-bottom: (@component-padding / 2);
+}
+
+.pulsar-acp-agent-message-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: (@component-padding / 2);
+  margin-top: (@component-padding / 2);
+}
+
+.pulsar-acp-agent-context-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: (@component-padding / 4);
+  padding: 1px (@component-padding / 2);
+  background-color: @background-color-highlight;
+  border: 1px solid @pane-item-border-color;
+  border-radius: @component-border-radius;
+  font-size: 0.85em;
+  line-height: 1.6;
+
+  .icon::before {
+    margin-right: 0;
+    font-size: 12px;
+  }
+
+  .pulsar-acp-agent-context-label {
+    overflow: hidden;
+    color: @text-color;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pulsar-acp-agent-context-remove {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    line-height: 14px;
+    font-size: 11px;
+    text-align: center;
+    background: @background-color-error;
+    color: @text-color-highlight;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+  }
 }
 
 .pulsar-acp-agent-sessions-toggle,
@@ -1102,6 +1197,6 @@
 // .tooltip-inner, so both must be overridden for long titles to wrap.
 .tooltip.pulsar-acp-agent-tooltip .tooltip-inner {
   white-space: normal;
-  max-width: 300px;
+  max-width: 240px;
   word-break: break-word;
 }

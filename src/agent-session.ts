@@ -6,7 +6,7 @@ import * as path from "path";
 import { Readable, Writable } from "stream";
 import { TextEditor } from "atom";
 import * as acp from "@agentclientprotocol/sdk";
-import { parseCommandLine, TerminalRecord } from "./util";
+import { parseCommandLine, TerminalRecord, buildContextBlock, ContextAttachment } from "./util";
 
 declare const __PULSAR_ACP_AGENT_VERSION__: string;
 
@@ -363,6 +363,10 @@ export class AgentSession {
     return this.promptCapabilities?.image === true;
   }
 
+  supportsEmbeddedContext(): boolean {
+    return this.promptCapabilities?.embeddedContext === true;
+  }
+
   currentSessionConfigOptions(): acp.SessionConfigOption[] | null {
     if (!this.sessionId) return null;
     return this.sessionConfigOptions.get(this.sessionId) ?? null;
@@ -462,6 +466,7 @@ export class AgentSession {
   async prompt(
     text: string,
     images?: Array<{ data: string; mimeType: string }>,
+    context?: ContextAttachment[],
   ): Promise<acp.PromptResponse> {
     if (this.running) throw new Error("The agent is already responding.");
     this.running = true;
@@ -474,12 +479,26 @@ export class AgentSession {
       if (!this.connection || !this.sessionId) {
         throw new Error("Agent session is not ready.");
       }
-      const prompt: acp.ContentBlock[] = [{ type: "text", text }];
+      // Block order mirrors Zed (text, then images, then embedded context),
+      // except the plain textarea has no inline anchors so context is appended
+      // rather than interleaved. The text block is skipped when empty so a
+      // context-only prompt is valid.
+      const prompt: acp.ContentBlock[] = [];
+      if (text) prompt.push({ type: "text", text });
       if (images && images.length > 0) {
         if (!this.supportsImages())
           throw new Error("The configured agent does not support image prompts.");
         for (const img of images) {
           prompt.push({ type: "image", data: img.data, mimeType: img.mimeType });
+        }
+      }
+      if (context && context.length > 0) {
+        if (!this.supportsEmbeddedContext())
+          throw new Error(
+            "The configured agent does not support embedded context.",
+          );
+        for (const attachment of context) {
+          prompt.push(buildContextBlock(attachment));
         }
       }
       this.appendHostContext(prompt);
@@ -802,6 +821,27 @@ export class AgentSession {
         -32002,
       );
     }
+  }
+
+  // Public, non-throwing project-containment check for editor context
+  // attachments. Unlike `assertProjectPath`, it can run before a session starts
+  // (falling back to the project folder) and never throws — it answers false for
+  // relative paths, missing roots, paths resolving outside the roots, or errors.
+  async isPathInProjectRoots(filePath: string): Promise<boolean> {
+    if (!path.isAbsolute(filePath)) return false;
+    let base = this.sessionCwd;
+    if (!base) {
+      try {
+        base = this.cwd();
+      } catch {
+        return false;
+      }
+    }
+    const roots = await this.allowedRealRoots(base);
+    const target = await fs.promises
+      .realpath(filePath)
+      .catch(() => path.resolve(filePath));
+    return isInsideRoots(target, roots);
   }
 
   private async allowedRealRoots(cwd: string | null = this.sessionCwd): Promise<string[]> {

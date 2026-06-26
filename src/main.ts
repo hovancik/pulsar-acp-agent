@@ -1,4 +1,4 @@
-import { CompositeDisposable, Disposable } from "atom";
+import { CommandEvent, CompositeDisposable, Disposable, TextEditor } from "atom";
 import type { StatusBar, Tile } from "atom/status-bar";
 import {
   AgentStatus,
@@ -117,6 +117,32 @@ function createView(): PulsarAcpAgentView {
   return view;
 }
 
+// Resolve the editor a context command was dispatched on (its target, falling
+// back to the center pane's active editor), open/focus the panel, and stage the
+// requested attachment. The attachment is validated again when the prompt sends.
+async function addEditorContext(
+  event: CommandEvent,
+  kind: "file" | "selection",
+): Promise<void> {
+  const element = event.currentTarget as unknown as {
+    getModel?: () => TextEditor | undefined;
+  };
+  const editor =
+    element.getModel?.() ?? atom.workspace.getCenter().getActiveTextEditor();
+  if (!editor) return;
+  const item = await atom.workspace.open(PULSAR_ACP_AGENT_URI, {
+    searchAllPanes: true,
+  });
+  if (!(item instanceof PulsarAcpAgentView)) return;
+  if (kind === "file") await item.addActiveFileContext(editor);
+  else await item.addSelectionContext(editor);
+}
+
+function editorHasSelection(): boolean {
+  const editor = atom.workspace.getCenter().getActiveTextEditor();
+  return !!editor && editor.getSelections().some((s) => !s.isEmpty());
+}
+
 export function activate(): void {
   // Seed/migrate the agent registry once before views start resolving it, then
   // refresh any panel already deserialized (a docked panel can be restored
@@ -130,12 +156,19 @@ export function activate(): void {
       if (uri === PULSAR_ACP_AGENT_URI) return createView();
     }),
     atom.commands.add("atom-workspace", {
-      "pulsar-acp-agent:toggle": () =>
-        atom.workspace.toggle(PULSAR_ACP_AGENT_URI),
-      "pulsar-acp-agent:focus": () =>
-        atom.workspace.open(PULSAR_ACP_AGENT_URI, { searchAllPanes: true }),
-      "pulsar-acp-agent:edit-agents": () =>
-        atom.workspace.open(atom.config.getUserConfigPath()),
+      "pulsar-acp-agent:toggle": {
+        displayName: "Pulsar ACP Agent: Toggle Panel",
+        didDispatch: () => atom.workspace.toggle(PULSAR_ACP_AGENT_URI),
+      },
+      "pulsar-acp-agent:focus": {
+        displayName: "Pulsar ACP Agent: Focus Panel",
+        didDispatch: () =>
+          atom.workspace.open(PULSAR_ACP_AGENT_URI, { searchAllPanes: true }),
+      },
+      "pulsar-acp-agent:edit-agents": {
+        displayName: "Pulsar ACP Agent: Edit Agents",
+        didDispatch: () => atom.workspace.open(atom.config.getUserConfigPath()),
+      },
     }),
     atom.commands.add(".pulsar-acp-agent", {
       // Pulsar only wires copy inside text editors, so chat selections can't be
@@ -154,6 +187,33 @@ export function activate(): void {
           event.abortKeyBinding();
         }
       },
+    }),
+    atom.commands.add("atom-text-editor", {
+      "pulsar-acp-agent:add-active-file-to-prompt": {
+        displayName: "Pulsar ACP Agent: Add Active File to Prompt",
+        didDispatch: (event) => {
+          void addEditorContext(event, "file");
+        },
+      },
+      "pulsar-acp-agent:add-selection-to-prompt": {
+        displayName: "Pulsar ACP Agent: Add Selection to Prompt",
+        didDispatch: (event) => {
+          void addEditorContext(event, "selection");
+        },
+      },
+    }),
+    atom.contextMenu.add({
+      "atom-text-editor": [
+        {
+          label: "Add Active File to ACP Prompt",
+          command: "pulsar-acp-agent:add-active-file-to-prompt",
+        },
+        {
+          label: "Add Selection to ACP Prompt",
+          command: "pulsar-acp-agent:add-selection-to-prompt",
+          shouldDisplay: () => editorHasSelection(),
+        },
+      ],
     }),
   );
 }

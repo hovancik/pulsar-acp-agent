@@ -38,6 +38,10 @@
       "pulsar-acp-agent:toggle",
       "pulsar-acp-agent:focus",
       "pulsar-acp-agent:edit-agents"
+    ],
+    "atom-text-editor": [
+      "pulsar-acp-agent:add-active-file-to-prompt",
+      "pulsar-acp-agent:add-selection-to-prompt"
     ]
   },
   "deserializers": {
