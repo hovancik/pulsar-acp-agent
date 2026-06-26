@@ -1,8 +1,15 @@
-import { CompositeDisposable } from "atom";
+import { CompositeDisposable, Disposable } from "atom";
 import * as acp from "@agentclientprotocol/sdk";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { AgentEvent, AgentSession } from "./agent-session";
+import { AgentEvent, AgentSession, LaunchTarget } from "./agent-session";
+import {
+  AgentsConfig,
+  isLaunchedAgentStale,
+  migrateAgentsConfig,
+  normalizeAgentsConfig,
+  resolveActiveAgent,
+} from "./agent-config";
 import {
   completedPlanEntries,
   configOptionLabel,
@@ -14,6 +21,50 @@ import {
 marked.setOptions({ breaks: true });
 
 export const PULSAR_ACP_AGENT_URI = "atom://pulsar-acp-agent";
+
+// Config glue. The agent registry lives under our namespace as three sibling
+// keys (matching the legacy scalar settings already there); the pure
+// agent-config module owns all the logic, this layer only reads/writes.
+const CFG_NS = "pulsar-acp-agent";
+const CFG_VERSION = "pulsar-acp-agent.version";
+const CFG_ACTIVE = "pulsar-acp-agent.activeAgentId";
+const CFG_AGENTS = "pulsar-acp-agent.agents";
+const CFG_LEGACY_COMMAND = "pulsar-acp-agent.command";
+let nextAgentMenuId = 1;
+
+function rawAgentsConfig(): Record<string, unknown> {
+  const raw: Record<string, unknown> = {};
+  const version = atom.config.get(CFG_VERSION);
+  if (version !== undefined) raw.version = version;
+  const activeAgentId = atom.config.get(CFG_ACTIVE);
+  if (activeAgentId !== undefined) raw.activeAgentId = activeAgentId;
+  const agents = atom.config.get(CFG_AGENTS);
+  if (agents !== undefined) raw.agents = agents;
+  return raw;
+}
+
+export function readAgentsConfig(): AgentsConfig {
+  return normalizeAgentsConfig(rawAgentsConfig());
+}
+
+function writeAgentsConfig(config: AgentsConfig): void {
+  atom.config.set(CFG_VERSION, config.version);
+  atom.config.set(CFG_AGENTS, config.agents);
+  if (config.activeAgentId) atom.config.set(CFG_ACTIVE, config.activeAgentId);
+  else atom.config.unset(CFG_ACTIVE);
+}
+
+// Runs once in activate(): seed/migrate the registry and drop the superseded
+// legacy `command` scalar. Persists only when something changed.
+export function migrateAgentsConfigStore(): void {
+  const legacy = atom.config.get(CFG_LEGACY_COMMAND);
+  const { config, changed } = migrateAgentsConfig(
+    rawAgentsConfig(),
+    typeof legacy === "string" ? legacy : undefined,
+  );
+  if (changed) writeAgentsConfig(config);
+  if (legacy !== undefined) atom.config.unset(CFG_LEGACY_COMMAND);
+}
 
 export type AgentStatus =
   | "idle"
@@ -220,8 +271,16 @@ export class PulsarAcpAgentView {
   private pointerDownInConversation = false;
   private scrollBoundConversations = new WeakSet<HTMLElement>();
 
+  private runtimeStatusEl!: HTMLElement;
   private liveStatusEl!: HTMLElement;
-  private agentNameEl!: HTMLButtonElement;
+  private agentPicker!: HTMLButtonElement;
+  private agentMenu!: HTMLElement;
+  private readonly agentMenuId = `pulsar-acp-agent-picker-menu-${nextAgentMenuId++}`;
+  private agentMenuOpen = false;
+  private agentsConfig!: AgentsConfig;
+  // The agent we last asked to launch (display snapshot + stale-detection id).
+  private activeTarget: LaunchTarget | null = null;
+  private infoButton!: HTMLButtonElement;
   private restartButton!: HTMLButtonElement;
   private infoPanel!: HTMLElement;
   private infoPanelOpen = false;
@@ -266,11 +325,13 @@ export class PulsarAcpAgentView {
   private imageSupportKnown = false;
   private supportsImages = false;
   private startObserver: IntersectionObserver | null = null;
+  private startAttempted = false;
   private reporter: AgentStatusReporter | null;
 
   constructor(reporter: AgentStatusReporter | null = null) {
     this.reporter = reporter;
     this.subscriptions = new CompositeDisposable();
+    this.agentsConfig = readAgentsConfig();
     this.session = new AgentSession();
 
     this.buildUI();
@@ -278,6 +339,10 @@ export class PulsarAcpAgentView {
       this.handleEvent(event),
     );
     this.subscriptions.add(this.eventSubscription);
+    this.subscriptions.add(
+      atom.config.onDidChange(CFG_NS, () => this.refreshFromConfig()),
+    );
+    this.renderAgentPicker();
     this.setLifecycleStatus("Idle \u2014 type a message to start the agent.");
     this.setAgentStatus("idle");
 
@@ -308,11 +373,51 @@ export class PulsarAcpAgentView {
 
   private ensureStarted(): void {
     this.disconnectStartObserver();
+    this.startAttempted = true;
+    const target = this.resolveTarget();
+    if (!target) {
+      this.renderNoAgentIdle();
+      return;
+    }
+    this.activeTarget = target;
+    this.renderAgentPicker();
+    this.startTarget(target);
+  }
+
+  private startTarget(target: LaunchTarget): void {
+    this.disconnectStartObserver();
     const currentSession = this.session;
-    this.session.start().catch((error) => {
+    this.session.start(target).catch((error) => {
       if (this.session !== currentSession) return;
       this.handleStartupError(error);
     });
+  }
+
+  // STRICT launch resolution from the latest config. Returns null when no agent
+  // is launchable (caller shows a neutral idle state — never auto-guesses).
+  private resolveTarget(): LaunchTarget | null {
+    this.agentsConfig = readAgentsConfig();
+    const resolved = resolveActiveAgent(this.agentsConfig);
+    if (resolved.reason === "ok" && resolved.agent && resolved.id) {
+      return {
+        id: resolved.id,
+        name: resolved.agent.name,
+        command: resolved.agent.command,
+      };
+    }
+    return null;
+  }
+
+  private renderNoAgentIdle(): void {
+    const reason = resolveActiveAgent(this.agentsConfig).reason;
+    this.setLifecycleStatus(
+      reason === "no-agents"
+        ? "No agents configured \u2014 use the agent picker to add one."
+        : "No agent selected \u2014 pick one from the agent menu.",
+    );
+    this.setAgentStatus("idle");
+    this.renderAgentPicker();
+    this.updateInputControls();
   }
 
   private handleStartupError(error: unknown): void {
@@ -325,10 +430,7 @@ export class PulsarAcpAgentView {
     this.renderLiveRow();
     this.setLifecycleStatus("Startup failed.");
     this.setAgentStatus("error");
-    this.infoPanelOpen = true;
-    this.renderInfoPanel();
-    this.infoPanel.style.display = "";
-    this.agentNameEl.classList.add("pulsar-acp-agent-name--active");
+    this.openInfoPanel();
     this.resetSessionsChrome();
     this.stopButton.disabled = true;
     this.updateInputControls();
@@ -348,24 +450,81 @@ export class PulsarAcpAgentView {
 
     const row1 = document.createElement("div");
     row1.classList.add("pulsar-acp-agent-header-row1");
-    this.agentNameEl = document.createElement("button");
-    this.agentNameEl.classList.add("pulsar-acp-agent-name");
-    this.agentNameEl.setAttribute("aria-expanded", "false");
-    this.agentNameEl.addEventListener("click", () => this.toggleInfoPanel());
+
+    const pickerWrap = document.createElement("div");
+    pickerWrap.classList.add("pulsar-acp-agent-picker-wrap");
+    this.agentPicker = document.createElement("button");
+    this.agentPicker.classList.add("pulsar-acp-agent-picker");
+    this.agentPicker.setAttribute("aria-haspopup", "menu");
+    this.agentPicker.setAttribute("aria-controls", this.agentMenuId);
+    this.agentPicker.setAttribute("aria-expanded", "false");
+    this.agentPicker.addEventListener("click", () => this.toggleAgentMenu());
     this.subscriptions.add(
-      atom.tooltips.add(this.agentNameEl, {
+      atom.tooltips.add(this.agentPicker, {
         title: () =>
-          this.storedAgentInfo != null || this.agentExited
-            ? "Agent details"
-            : "",
+          isLaunchedAgentStale(this.agentsConfig, this.session.launchedAgent?.id)
+            ? "This agent was removed from config; pick another to switch."
+            : "Switch agent",
+        placement: "right",
       }),
     );
+    this.agentMenu = document.createElement("div");
+    this.agentMenu.classList.add("pulsar-acp-agent-picker-menu");
+    this.agentMenu.id = this.agentMenuId;
+    this.agentMenu.setAttribute("role", "menu");
+    this.agentMenu.setAttribute("aria-label", "Agents");
+    this.agentMenu.style.display = "none";
+    const onPickerKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && this.agentMenuOpen) {
+        this.closeAgentMenu();
+        this.agentPicker.focus();
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (!this.agentMenuOpen) this.openAgentMenu();
+        this.focusAgentMenuItem("next");
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (!this.agentMenuOpen) this.openAgentMenu();
+        this.focusAgentMenuItem("previous");
+        return;
+      }
+      if (event.key === "Home" && this.agentMenuOpen) {
+        event.preventDefault();
+        this.focusAgentMenuItem("first");
+        return;
+      }
+      if (event.key === "End" && this.agentMenuOpen) {
+        event.preventDefault();
+        this.focusAgentMenuItem("last");
+      }
+    };
+    this.agentPicker.addEventListener("keydown", onPickerKey);
+    this.agentMenu.addEventListener("keydown", onPickerKey);
+    pickerWrap.appendChild(this.agentPicker);
+    pickerWrap.appendChild(this.agentMenu);
+    // Close the menu when clicking anywhere outside the picker.
+    const onDocMouseDown = (event: MouseEvent) => {
+      if (this.agentMenuOpen && !pickerWrap.contains(event.target as Node)) {
+        this.closeAgentMenu();
+      }
+    };
+    document.addEventListener("mousedown", onDocMouseDown, true);
+    this.subscriptions.add(
+      new Disposable(() =>
+        document.removeEventListener("mousedown", onDocMouseDown, true),
+      ),
+    );
+
     this.restartButton = this.makeButton("Restart", () => this.restart());
     this.restartButton.classList.add("pulsar-acp-agent-restart");
     this.subscriptions.add(
       atom.tooltips.add(this.restartButton, { title: "Restart agent" }),
     );
-    row1.appendChild(this.agentNameEl);
+    row1.appendChild(pickerWrap);
 
     this.sessionsToggle = document.createElement("button");
     this.sessionsToggle.classList.add(
@@ -413,18 +572,42 @@ export class PulsarAcpAgentView {
     );
     this.newSessionButton.addEventListener("click", () => this.startNewSession());
 
-    row1.appendChild(this.sessionsToggle);
-    row1.appendChild(this.newSessionButton);
-
     this.sessionsList = document.createElement("div");
     this.sessionsList.classList.add("pulsar-acp-agent-sessions-list");
     this.sessionsList.style.display = "none";
 
-    this.liveStatusEl = document.createElement("div");
-    this.liveStatusEl.classList.add("pulsar-acp-agent-header-row2");
+    this.infoButton = document.createElement("button");
+    this.infoButton.classList.add("pulsar-acp-agent-info-toggle");
+    this.infoButton.textContent = "More\u2026";
+    this.infoButton.setAttribute("aria-label", "Agent details");
+    this.infoButton.setAttribute("aria-expanded", "false");
+    this.infoButton.style.display = "none";
+    this.infoButton.addEventListener("click", () =>
+      this.setInfoPanelOpen(!this.infoPanelOpen),
+    );
+    this.subscriptions.add(
+      atom.tooltips.add(this.infoButton, {
+        title: "Show agent details and actions",
+        placement: "bottom",
+      }),
+    );
 
+    this.runtimeStatusEl = document.createElement("div");
+    this.runtimeStatusEl.classList.add("pulsar-acp-agent-header-row2");
+    this.liveStatusEl = document.createElement("span");
+    this.liveStatusEl.classList.add("pulsar-acp-agent-token-usage");
+
+    const rightGroup = document.createElement("div");
+    rightGroup.classList.add("pulsar-acp-agent-header-right");
+    rightGroup.appendChild(this.sessionsToggle);
+    rightGroup.appendChild(this.newSessionButton);
+
+    this.runtimeStatusEl.appendChild(this.infoButton);
+    this.runtimeStatusEl.appendChild(this.liveStatusEl);
+
+    row1.appendChild(rightGroup);
     header.appendChild(row1);
-    header.appendChild(this.liveStatusEl);
+    header.appendChild(this.runtimeStatusEl);
 
     this.infoPanel = document.createElement("div");
     this.infoPanel.classList.add("pulsar-acp-agent-info-panel");
@@ -739,10 +922,18 @@ export class PulsarAcpAgentView {
     }
   }
 
-  private toggleInfoPanel(): void {
-    if (!this.storedAgentInfo && !this.agentExited) return;
-    this.infoPanelOpen = !this.infoPanelOpen;
-    if (this.infoPanelOpen) {
+  private openInfoPanel(): void {
+    this.setInfoPanelOpen(true);
+  }
+
+  private setInfoPanelOpen(open: boolean): void {
+    if (open && !this.storedAgentInfo && !this.agentExited) return;
+    if (open === this.infoPanelOpen) {
+      if (open) this.renderInfoPanel();
+      return;
+    }
+    this.infoPanelOpen = open;
+    if (open) {
       this.renderInfoPanel();
       this.infoPanel.style.display = "";
       // Reading offsetHeight forces a synchronous reflow so scrollTop correction
@@ -757,32 +948,34 @@ export class PulsarAcpAgentView {
       void this.conversation.offsetHeight; // force reflow
       this.conversation.scrollTop = Math.max(0, savedScrollTop - delta);
     }
-    this.agentNameEl.classList.toggle(
-      "pulsar-acp-agent-name--active",
-      this.infoPanelOpen,
-    );
-    this.agentNameEl.setAttribute("aria-expanded", String(this.infoPanelOpen));
+    this.infoButton.setAttribute("aria-expanded", String(this.infoPanelOpen));
   }
 
-  // Identity disclosure. Lifecycle and turn state live in the status bar tile;
-  // token usage lives in the separate live row.
+  // Runtime identity disclosure. Turn state lives in the status bar tile; token
+  // usage shares this live row when the agent reports it for the active session.
   private renderPill(): void {
     const info = this.storedAgentInfo;
-    const name = info ? info.title || info.name : null;
-    this.agentNameEl.textContent = name || (this.agentExited ? "Agent" : "Starting\u2026");
-    this.agentNameEl.style.display = "";
     const hasPanel = info != null || this.agentExited;
-    this.agentNameEl.disabled = !hasPanel;
-    this.agentNameEl.classList.toggle(
-      "pulsar-acp-agent-name--toggle",
-      hasPanel,
-    );
+    this.infoButton.style.display = hasPanel ? "" : "none";
+    this.renderLiveRow();
   }
 
   private renderInfoPanel(): void {
     this.infoPanel.innerHTML = "";
     const info = this.storedAgentInfo;
     const caps = this.storedCapabilities;
+
+    const header = document.createElement("div");
+    header.classList.add("pulsar-acp-agent-info-header");
+    const title = document.createElement("span");
+    title.classList.add("pulsar-acp-agent-info-title");
+    title.textContent = "Agent details";
+    const actions = document.createElement("div");
+    actions.classList.add("pulsar-acp-agent-info-actions");
+    actions.appendChild(this.restartButton);
+    header.appendChild(title);
+    header.appendChild(actions);
+    this.infoPanel.appendChild(header);
 
     const addRow = (label: string, content: HTMLElement | string): void => {
       const row = document.createElement("div");
@@ -834,10 +1027,12 @@ export class PulsarAcpAgentView {
       statusValue.classList.add("pulsar-acp-agent-info-value");
       statusValue.textContent = this.lifecycleStatus || "Not connected.";
       statusContent.appendChild(statusValue);
-      statusContent.appendChild(this.restartButton);
       addRow("Status", statusContent);
       return;
     }
+
+    const agentName = info.title || info.name;
+    if (agentName) addRow("Agent", agentName);
 
     const versionValue = document.createElement("span");
     versionValue.classList.add("pulsar-acp-agent-info-value");
@@ -845,7 +1040,6 @@ export class PulsarAcpAgentView {
     const versionContent = document.createElement("div");
     versionContent.classList.add("pulsar-acp-agent-info-version");
     versionContent.appendChild(versionValue);
-    versionContent.appendChild(this.restartButton);
     addRow("Version", versionContent);
 
     addRow("Capabilities", caps ? (infoTable(caps) ?? "none reported") : "none reported");
@@ -872,35 +1066,50 @@ export class PulsarAcpAgentView {
     )
       return;
 
-    const currentSession = this.session;
-    if (this.pendingImages.length > 0) {
-      this.preparingPrompt = true;
-      this.updateInputControls();
-
-      try {
-        await this.session.start();
-        if (this.session !== currentSession) return;
-        if (!this.session.supportsImages()) {
-          this.appendError(
-            "The configured agent does not support image prompts; images were not sent.",
-          );
-          this.pendingImages = [];
-          this.clearThumbnails();
-          return;
-        }
-      } catch (error) {
-        if (this.session === currentSession) {
-          this.appendError(
-            error instanceof Error ? error.message : String(error),
-          );
-          this.setAgentStatus("error");
-        }
+    // A live session stays on its current agent — prompting never silently
+    // switches (a hand-edited activeAgentId applies on the next Switch/Restart).
+    // Only resolve from config when starting fresh or reconnecting after exit.
+    const live = this.session.sessionId != null && !this.agentExited;
+    let target: LaunchTarget | null = live ? this.session.currentTarget : null;
+    if (!target) {
+      target = this.resolveTarget();
+      if (!target) {
+        this.appendError(
+          "No agent configured. Use the agent picker to add or select one.",
+        );
+        this.setAgentStatus("error");
         return;
-      } finally {
-        if (this.session === currentSession) {
-          this.preparingPrompt = false;
-          this.updateInputControls();
-        }
+      }
+    }
+    this.activeTarget = target;
+    this.renderAgentPicker();
+
+    const currentSession = this.session;
+    this.preparingPrompt = true;
+    this.updateInputControls();
+    try {
+      await this.session.start(target);
+      if (this.session !== currentSession) return;
+      if (this.pendingImages.length > 0 && !this.session.supportsImages()) {
+        this.appendError(
+          "The configured agent does not support image prompts; images were not sent.",
+        );
+        this.pendingImages = [];
+        this.clearThumbnails();
+        return;
+      }
+    } catch (error) {
+      if (this.session === currentSession) {
+        this.appendError(
+          error instanceof Error ? error.message : String(error),
+        );
+        this.setAgentStatus("error");
+      }
+      return;
+    } finally {
+      if (this.session === currentSession) {
+        this.preparingPrompt = false;
+        this.updateInputControls();
       }
     }
 
@@ -919,7 +1128,9 @@ export class PulsarAcpAgentView {
     });
   }
 
-  private restart(): void {
+  // Disposes the running session and resets all conversation/agent chrome to a
+  // clean idle state. Shared by restart() and switchAgent(); does not start.
+  private resetSessionForRelaunch(): void {
     this.subscriptions.remove(this.eventSubscription);
     this.session.dispose();
     this.session = new AgentSession();
@@ -933,17 +1144,213 @@ export class PulsarAcpAgentView {
     this.attachButton.style.display = "none";
     this.resetAgentChrome();
     this.resetSessionsChrome();
-    this.setLifecycleStatus("Idle \u2014 type a message to start the agent.");
     this.setAgentStatus("idle");
     this.renderLiveRow();
     this.stopButton.disabled = true;
-    this.updateInputControls();
     this.autoApprovePermissions = false;
     this.updateAutoApproveButton();
+  }
+
+  private restart(): void {
+    this.resetSessionForRelaunch();
+    this.setLifecycleStatus("Idle \u2014 type a message to start the agent.");
+    this.updateInputControls();
 
     // Restart is user-initiated on a visible panel, so reconnect immediately
-    // rather than waiting for the panel to be shown again.
+    // rather than waiting for the panel to be shown again. ensureStarted()
+    // re-resolves the LATEST command from config (so live edits apply) and shows
+    // the idle "pick an agent" state when nothing is launchable.
     this.ensureStarted();
+  }
+
+  // The only path that performs a process switch (distinct from Restart, which
+  // relaunches the active agent).
+  private switchAgent(id: string): void {
+    const config = readAgentsConfig();
+    this.agentsConfig = config;
+    const agent = config.agents[id];
+    if (!agent) {
+      this.renderAgentPicker();
+      return;
+    }
+    const target: LaunchTarget = {
+      id,
+      name: agent.name,
+      command: agent.command,
+    };
+
+    // No-op only when this exact agent is already live with the same command
+    // (key on the running snapshot, so a hand-edited activeAgentId or command
+    // still applies when you pick the agent).
+    const launched = this.session.launchedAgent;
+    const liveSameAgent =
+      launched?.id === id &&
+      launched.command === agent.command &&
+      this.session.sessionId != null &&
+      !this.agentExited;
+    if (liveSameAgent) {
+      if (config.activeAgentId !== id) this.setActiveAgentId(id);
+      this.renderAgentPicker();
+      return;
+    }
+
+    if (this.session.running) {
+      atom.confirm(
+        {
+          type: "warning",
+          message: `Switch to ${agent.name}?`,
+          detail:
+            "The current agent is still responding. Switching stops it and clears this conversation.",
+          buttons: ["Switch", "Cancel"],
+          defaultId: 1,
+        },
+        (response) => {
+          if (response === 0) this.performSwitch(target);
+        },
+      );
+      return;
+    }
+
+    this.performSwitch(target);
+  }
+
+  private performSwitch(target: LaunchTarget): void {
+    if (readAgentsConfig().activeAgentId !== target.id) {
+      this.setActiveAgentId(target.id);
+    }
+    this.resetSessionForRelaunch();
+    this.setLifecycleStatus("Idle \u2014 starting agent\u2026");
+    this.updateInputControls();
+    this.activeTarget = target;
+    this.renderAgentPicker();
+    this.startTarget(target);
+  }
+
+  private setActiveAgentId(id: string): void {
+    atom.config.set(CFG_ACTIVE, id);
+  }
+
+  // Re-read config and refresh the picker. Purely a UI refresh: never starts,
+  // stops, or switches a process, so it cannot loop with our own writes.
+  refreshFromConfig(): void {
+    this.agentsConfig = readAgentsConfig();
+    this.renderAgentPicker();
+  }
+
+  // Called once after activate() seeds/migrates config. Picks up the migrated
+  // shape and, if this panel already tried to start while config was still
+  // unmigrated (and nothing launched), retries now that an agent may resolve.
+  // Panels that were never shown keep their lazy start-on-visible behavior.
+  refreshAfterMigration(): void {
+    this.refreshFromConfig();
+    const idle =
+      this.startAttempted &&
+      this.activeTarget == null &&
+      this.session.sessionId == null &&
+      !this.agentExited;
+    if (idle) this.ensureStarted();
+  }
+
+  private agentPickerLabel(): string {
+    if (this.activeTarget) return this.activeTarget.name;
+    const resolved = resolveActiveAgent(this.agentsConfig);
+    if (resolved.reason === "ok" && resolved.agent) return resolved.agent.name;
+    if (resolved.reason === "no-agents") return "No agents";
+    return "Select agent";
+  }
+
+  private renderAgentPicker(): void {
+    this.agentPicker.textContent = this.agentPickerLabel();
+    const stale = isLaunchedAgentStale(
+      this.agentsConfig,
+      this.session.launchedAgent?.id,
+    );
+    this.agentPicker.classList.toggle("is-stale", stale);
+
+    this.agentMenu.innerHTML = "";
+    const entries = Object.entries(this.agentsConfig.agents);
+    for (const [id, agent] of entries) {
+      const item = document.createElement("button");
+      item.classList.add("pulsar-acp-agent-picker-item");
+      item.setAttribute("role", "menuitem");
+      if (id === this.agentsConfig.activeAgentId) {
+        item.classList.add("is-active");
+        item.setAttribute("aria-current", "true");
+      }
+      item.textContent = agent.name;
+      item.addEventListener("click", () => {
+        this.closeAgentMenu();
+        this.switchAgent(id);
+      });
+      this.agentMenu.appendChild(item);
+    }
+    if (entries.length === 0) {
+      const empty = document.createElement("div");
+      empty.classList.add("pulsar-acp-agent-picker-empty");
+      empty.textContent = "No agents configured";
+      this.agentMenu.appendChild(empty);
+    }
+    const separator = document.createElement("div");
+    separator.classList.add("pulsar-acp-agent-picker-separator");
+    separator.setAttribute("role", "separator");
+    this.agentMenu.appendChild(separator);
+    const edit = document.createElement("button");
+    edit.classList.add(
+      "pulsar-acp-agent-picker-item",
+      "pulsar-acp-agent-picker-edit",
+    );
+    edit.setAttribute("role", "menuitem");
+    edit.textContent = "Edit agents\u2026";
+    edit.addEventListener("click", () => {
+      this.closeAgentMenu();
+      atom.commands.dispatch(this.element, "pulsar-acp-agent:edit-agents");
+    });
+    this.agentMenu.appendChild(edit);
+  }
+
+  private agentMenuItems(): HTMLButtonElement[] {
+    return Array.from(
+      this.agentMenu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    );
+  }
+
+  private focusAgentMenuItem(
+    direction: "first" | "last" | "next" | "previous",
+  ): void {
+    const items = this.agentMenuItems();
+    if (items.length === 0) return;
+    const active = document.activeElement;
+    const currentIndex = items.indexOf(active as HTMLButtonElement);
+    let nextIndex = 0;
+    if (direction === "last") {
+      nextIndex = items.length - 1;
+    } else if (direction === "next") {
+      nextIndex = currentIndex >= 0 ? (currentIndex + 1) % items.length : 0;
+    } else if (direction === "previous") {
+      nextIndex =
+        currentIndex >= 0
+          ? (currentIndex - 1 + items.length) % items.length
+          : items.length - 1;
+    }
+    items[nextIndex].focus();
+  }
+
+  private toggleAgentMenu(): void {
+    if (this.agentMenuOpen) this.closeAgentMenu();
+    else this.openAgentMenu();
+  }
+
+  private openAgentMenu(): void {
+    this.renderAgentPicker();
+    this.agentMenu.style.display = "";
+    this.agentMenuOpen = true;
+    this.agentPicker.setAttribute("aria-expanded", "true");
+  }
+
+  private closeAgentMenu(): void {
+    this.agentMenu.style.display = "none";
+    this.agentMenuOpen = false;
+    this.agentPicker.setAttribute("aria-expanded", "false");
   }
 
   private resetSessionsChrome(): void {
@@ -974,7 +1381,7 @@ export class PulsarAcpAgentView {
     this.infoPanel.style.display = "none";
     this.infoPanel.innerHTML = "";
     this.infoPanelOpen = false;
-    this.agentNameEl.classList.remove("pulsar-acp-agent-name--active");
+    this.infoButton.setAttribute("aria-expanded", "false");
   }
 
   private clearConversation(): void {
@@ -1139,6 +1546,7 @@ export class PulsarAcpAgentView {
         this.setAgentStatus("connecting");
         break;
       case "initialized":
+        this.agentExited = false;
         this.storedAgentInfo = event.info;
         this.storedCapabilities = event.capabilities;
         if (event.info && this.infoPanelOpen) this.renderInfoPanel();
@@ -1234,10 +1642,7 @@ export class PulsarAcpAgentView {
         this.setAgentStatus("error");
         // Auto-open details so Restart stays reachable even if the agent died
         // before reporting any identity (e.g. a bad agent command).
-        this.infoPanelOpen = true;
-        this.renderInfoPanel();
-        this.infoPanel.style.display = "";
-        this.agentNameEl.classList.add("pulsar-acp-agent-name--active");
+        this.openInfoPanel();
         this.resetSessionsChrome();
         this.stopButton.disabled = true;
         this.updateInputControls();
@@ -2254,9 +2659,14 @@ export class PulsarAcpAgentView {
   }
 
   private renderLiveRow(): void {
-    const text = this.currentTokens ?? "";
+    let text = this.currentTokens ?? "";
+    if (!text && (!this.storedAgentInfo || this.agentExited)) {
+      text = this.lifecycleStatus || (this.agentExited ? "Agent exited" : "Starting\u2026");
+    }
     this.liveStatusEl.textContent = text;
     this.liveStatusEl.style.display = text ? "" : "none";
+    const hasDetails = this.infoButton.style.display !== "none";
+    this.runtimeStatusEl.style.display = hasDetails || text ? "" : "none";
   }
 
   // Token usage is per-session; remember it so switching back to a session

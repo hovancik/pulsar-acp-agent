@@ -23,56 +23,174 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
 
-  .pulsar-acp-agent-name {
-    flex-shrink: 0;
-    padding: 0;
-    background: none;
-    border: none;
-    color: @text-color;
-    font-size: 1em;
+.pulsar-acp-agent-picker-wrap {
+  position: relative;
+  flex-shrink: 0;
+  // Pull the borderless label flush with the version line below so the agent
+  // name and version stack as a single title/subtitle identity block.
+  margin-left: -6px;
+}
+
+.pulsar-acp-agent-picker {
+  display: inline-flex;
+  align-items: center;
+  max-width: 16em;
+  padding: 2px 6px;
+  background: none;
+  border: none;
+  border-radius: @component-border-radius;
+  color: @text-color;
+  font-size: 0.9em;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &::after {
+    content: " \25be";
+    margin-left: 4px;
+    font-weight: normal;
+    opacity: 0.5;
+  }
+
+  &:hover {
+    background-color: @background-color-highlight;
+    color: @text-color-highlight;
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &:focus-visible {
+    outline: 1px solid @text-color-info;
+    outline-offset: 1px;
+  }
+
+  &.is-stale {
+    color: @text-color-warning;
+  }
+}
+
+.pulsar-acp-agent-picker-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  margin-top: 2px;
+  min-width: 12em;
+  max-width: 20em;
+  padding: (@component-padding / 4) 0;
+  background-color: @overlay-background-color;
+  border: 1px solid @overlay-border-color;
+  border-radius: @component-border-radius;
+  box-shadow: 0 2px 8px fade(black, 30%);
+}
+
+.pulsar-acp-agent-picker-item {
+  display: block;
+  position: relative;
+  width: 100%;
+  text-align: left;
+  padding: (@component-padding / 3) (@component-padding * 1.5);
+  background: none;
+  border: none;
+  color: @text-color;
+  font-family: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &:hover,
+  &:focus-visible {
+    background-color: @background-color-highlight;
+    color: @text-color-highlight;
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &.is-active {
     font-weight: 600;
-    letter-spacing: 0.01em;
-    cursor: default;
+    color: @text-color-highlight;
 
-    &.pulsar-acp-agent-name--toggle {
-      cursor: pointer;
-
-      &::after {
-        content: " \25be";
-        margin-left: 4px;
-        font-weight: normal;
-        opacity: 0.5;
-      }
-
-      &:hover {
-        color: @text-color-highlight;
-
-        &::after {
-          opacity: 0.9;
-        }
-      }
-    }
-
-    &.pulsar-acp-agent-name--active {
-      color: @text-color-highlight;
-
-      &::after {
-        content: " \25b4";
-        opacity: 0.9;
-      }
+    &::before {
+      content: "\2713";
+      position: absolute;
+      margin-left: -1em;
     }
   }
 }
 
+.pulsar-acp-agent-picker-empty {
+  padding: (@component-padding / 3) (@component-padding * 1.5);
+  color: @text-color-subtle;
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+.pulsar-acp-agent-picker-separator {
+  height: 1px;
+  margin: (@component-padding / 4) 0;
+  background-color: @overlay-border-color;
+}
+
 .pulsar-acp-agent-header-row2 {
-  margin-top: (@component-padding / 2);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 1px;
   color: @text-color-subtle;
   font-size: 0.82em;
   line-height: 1.4;
+}
+
+.pulsar-acp-agent-info-toggle {
+  flex-shrink: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: @text-color-subtle;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  line-height: inherit;
+
+  &:hover,
+  &[aria-expanded="true"] {
+    color: @text-color;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &:focus-visible {
+    outline: 1px solid @text-color-info;
+    outline-offset: 2px;
+  }
+}
+
+.pulsar-acp-agent-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.pulsar-acp-agent-token-usage {
+  flex-shrink: 0;
+  margin-left: auto;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .pulsar-acp-agent-info-panel {
@@ -80,6 +198,27 @@
   padding: (@component-padding * 0.75) @component-padding;
   background-color: @base-background-color;
   font-size: 0.85em;
+}
+
+.pulsar-acp-agent-info-header {
+  display: flex;
+  align-items: center;
+  gap: @component-padding;
+  margin-bottom: (@component-padding * 0.75);
+}
+
+.pulsar-acp-agent-info-title {
+  flex: 1;
+  min-width: 0;
+  color: @text-color;
+  font-weight: 600;
+}
+
+.pulsar-acp-agent-info-actions {
+  display: flex;
+  align-items: center;
+  gap: (@component-padding / 2);
+  margin-left: auto;
 }
 
 .pulsar-acp-agent-info-row {
@@ -111,15 +250,8 @@
 .pulsar-acp-agent-info-version {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   flex: 1;
   gap: @component-padding;
-
-  .pulsar-acp-agent-restart {
-    flex-shrink: 0;
-    padding: 1px 10px;
-    font-size: 0.95em;
-  }
 }
 
 .pulsar-acp-agent-info-table {
@@ -815,8 +947,6 @@
 }
 
 .pulsar-acp-agent-sessions-toggle {
-  margin-left: auto;
-
   &[aria-expanded="true"] {
     color: @text-color;
   }

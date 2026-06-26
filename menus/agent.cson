@@ -13,6 +13,10 @@
             'label': 'Focus Panel'
             'command': 'pulsar-acp-agent:focus'
           }
+          {
+            'label': 'Edit Agents'
+            'command': 'pulsar-acp-agent:edit-agents'
+          }
         ]
       }
     ]

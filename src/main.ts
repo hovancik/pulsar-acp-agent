@@ -3,6 +3,7 @@ import type { StatusBar, Tile } from "atom/status-bar";
 import {
   AgentStatus,
   AgentStatusReporter,
+  migrateAgentsConfigStore,
   PULSAR_ACP_AGENT_URI,
   PulsarAcpAgentView,
 } from "./agent-view";
@@ -117,6 +118,12 @@ function createView(): PulsarAcpAgentView {
 }
 
 export function activate(): void {
+  // Seed/migrate the agent registry once before views start resolving it, then
+  // refresh any panel already deserialized (a docked panel can be restored
+  // before activate runs).
+  migrateAgentsConfigStore();
+  for (const view of views) view.refreshAfterMigration();
+
   subscriptions = new CompositeDisposable();
   subscriptions.add(
     atom.workspace.addOpener((uri: string) => {
@@ -127,6 +134,8 @@ export function activate(): void {
         atom.workspace.toggle(PULSAR_ACP_AGENT_URI),
       "pulsar-acp-agent:focus": () =>
         atom.workspace.open(PULSAR_ACP_AGENT_URI, { searchAllPanes: true }),
+      "pulsar-acp-agent:edit-agents": () =>
+        atom.workspace.open(atom.config.getUserConfigPath()),
     }),
     atom.commands.add(".pulsar-acp-agent", {
       // Pulsar only wires copy inside text editors, so chat selections can't be

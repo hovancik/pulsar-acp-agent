@@ -4,18 +4,24 @@ Guidance for AI agents and contributors working on this package.
 
 ## Architecture
 
-Three `src/` modules, bundled to `lib/` by `build.mjs` (esbuild):
+Five `src/` modules, bundled to `lib/` by `build.mjs` (esbuild):
 
 - `main.ts` — Pulsar entry point: `activate`/`deactivate`, the
-  `pulsar-acp-agent:toggle`/`focus` commands, the workspace opener for
-  `atom://pulsar-acp-agent`, the `deserializePulsarAcpAgentView` deserializer,
-  and the status-bar `StatusIndicator`. No agent logic.
-- `agent-session.ts` — ACP transport. Spawns the agent with `cross-spawn`,
+  `pulsar-acp-agent:toggle`/`focus`/`edit-agents` commands, the workspace opener
+  for `atom://pulsar-acp-agent`, the `deserializePulsarAcpAgentView` deserializer,
+  the one-time agent-registry migration on activate, and the status-bar
+  `StatusIndicator`. No agent logic.
+- `agent-session.ts` — ACP transport. Spawns the agent with `cross-spawn` from a
+  resolved `LaunchTarget` (`{ id, name, command }`; never reads launch config),
   speaks JSON-RPC over stdio, implements the ACP client side (file/terminal/
   permission capabilities), and emits a discriminated `AgentEvent` union. No DOM.
 - `agent-view.ts` — the dock panel UI (`PulsarAcpAgentView`). Consumes
   `AgentEvent`s, renders markdown via `marked` + `DOMPurify`, handles
-  prompts/images/sessions/tool calls.
+  prompts/images/sessions/tool calls, owns the header agent picker
+  (select/switch), and holds the thin `atom.config` glue for the agent registry.
+- `agent-config.ts` — pure agent-registry logic (`normalizeAgentsConfig`,
+  `migrateAgentsConfig`, `resolveActiveAgent`, `isLaunchedAgentStale`), no `atom`
+  import, bundled separately so it's unit-testable like `util.ts`.
 - `util.ts` — pure helpers (`parseCommandLine`, `flattenInfoRows`,
   `TerminalRecord`), bundled separately so it's unit-testable without `atom`.
 
