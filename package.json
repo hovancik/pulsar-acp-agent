@@ -36,7 +36,8 @@
   "activationCommands": {
     "atom-workspace": [
       "pulsar-acp-agent:toggle",
-      "pulsar-acp-agent:focus"
+      "pulsar-acp-agent:focus",
+      "pulsar-acp-agent:edit-agents"
     ]
   },
   "deserializers": {
@@ -69,13 +70,6 @@
     "zod": "^3.25.76"
   },
   "configSchema": {
-    "command": {
-      "type": "string",
-      "default": "copilot --acp --stdio",
-      "order": 1,
-      "title": "Agent command",
-      "description": "Full command line for an executable that speaks ACP over stdio. Examples: `copilot --acp --stdio`, `gemini --experimental-acp`. Wrap a path that contains spaces in double quotes."
-    },
     "sendHostContext": {
       "type": "boolean",
       "default": true,

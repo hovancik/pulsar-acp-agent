@@ -89,6 +89,7 @@ terminal whose output is shown in the panel.
 
 | ACP feature | Status | Notes |
 | --- | --- | --- |
+| Agent registry & selection | ✅ | Configure multiple agents (`{ name, command }`) under the `pulsar-acp-agent` config namespace; a header picker selects the active agent and switches between them. Mirrors Zed's `agent_servers` record shape (without the registry/install variant). The active agent persists across reloads. |
 | Model display | 🟡 | The model config selector's button shows the current model when the agent exposes a `model` option. |
 | Model selection | ✅ | Switch models when the agent exposes a `model` session config option (see below). |
 | Session modes (`session/set_mode`) | ⬜ | Superseded by session config options, which expose `mode` as a selectable option; the legacy standalone selector is not implemented. |

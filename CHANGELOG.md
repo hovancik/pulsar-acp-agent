@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for multiple ACP agents: configure several and switch between them from the header.
 - Added per-session config option dropdowns in the footer for agent-exposed selectors such as model, custom agent, and reasoning effort (ACP `configOptions`).
 - Added a pinned, collapsible **Plan** bar above the composer that shows the agent's live ACP plan with progress and the current step, and snapshots completed plans into the conversation.
 

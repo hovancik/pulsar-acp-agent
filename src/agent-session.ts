@@ -71,6 +71,14 @@ export type AgentEvent =
 
 type Listener = (event: AgentEvent) => void;
 
+// The resolved agent a session is launched from. Passed in by the view, which
+// owns agent launch config resolution.
+export interface LaunchTarget {
+  id: string;
+  name: string;
+  command: string;
+}
+
 interface TerminalAuthMeta {
   command?: string;
   args?: string[];
@@ -105,6 +113,8 @@ export class AgentSession {
   private promptCapabilities: acp.PromptCapabilities | null = null;
   private sessionCwd: string | null = null;
   private starting: Promise<void> | null = null;
+  private launchTarget: LaunchTarget | null = null;
+  private startedTarget: LaunchTarget | null = null;
   private permissionResolvers = new Set<
     (outcome: acp.RequestPermissionResponse) => void
   >();
@@ -128,14 +138,43 @@ export class AgentSession {
     }
   }
 
-  start(): Promise<void> {
-    if (this.sessionId) return Promise.resolve();
-    if (this.starting) return this.starting;
-    this.starting = this._start().catch((error) => {
-      this.starting = null;
+  // The agent this session actually spawned (display-only snapshot). Stays set
+  // after exit so the header can keep showing the agent's name.
+  get launchedAgent(): LaunchTarget | null {
+    return this.startedTarget;
+  }
+
+  // The agent this session is launching / running (set the moment start() is
+  // accepted). Used by the view to keep a live session on its own agent.
+  get currentTarget(): LaunchTarget | null {
+    return this.launchTarget;
+  }
+
+  start(target: LaunchTarget): Promise<void> {
+    // A session is pinned to a single agent for its whole lifetime. Switching
+    // agents always allocates a fresh AgentSession (see the view's
+    // switchAgent/restart), so we never kill+respawn a different agent in place
+    // — that keeps "switch" the only path that performs a process switch and
+    // avoids concurrent _start() races.
+    if (this.sessionId) {
+      if (this.launchTarget?.id === target.id) return Promise.resolve();
+      return Promise.reject(
+        new Error("Cannot switch agents on a live session."),
+      );
+    }
+    if (this.starting) {
+      if (this.launchTarget?.id === target.id) return this.starting;
+      return Promise.reject(
+        new Error("The agent is still starting; try again."),
+      );
+    }
+    this.launchTarget = target;
+    const pending = this._start().catch((error) => {
+      if (this.starting === pending) this.starting = null;
       throw error;
     });
-    return this.starting;
+    this.starting = pending;
+    return pending;
   }
 
   private async _start(): Promise<void> {
@@ -152,12 +191,14 @@ export class AgentSession {
       this.sessionConfigOptions.clear();
     }
 
-    const commandLine: string =
-      atom.config.get("pulsar-acp-agent.command") || "copilot --acp --stdio";
-    const [command, ...args] = parseCommandLine(commandLine);
+    const target = this.launchTarget;
+    if (!target) {
+      throw new Error("No agent selected.");
+    }
+    const [command, ...args] = parseCommandLine(target.command);
     if (!command) {
       throw new Error(
-        "No agent command configured. Set it in the Agent package settings.",
+        "No agent command configured. Edit agents to set one.",
       );
     }
     const cwd = this.cwd();
@@ -169,6 +210,8 @@ export class AgentSession {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
+    // Display-only snapshot of what we actually spawned (see launchedAgent).
+    this.startedTarget = target;
 
     const { stdin, stdout, stderr } = child;
     if (!stdin || !stdout || !stderr) {
@@ -182,7 +225,7 @@ export class AgentSession {
         const code = (error as NodeJS.ErrnoException).code;
         const message =
           code === "ENOENT"
-            ? `Could not find "${command}". Press Restart to try again. If it still fails, install it and/or set its full path in the Agent package settings.`
+            ? `Could not find "${command}". Edit agents to correct the command or path, then press Restart.`
             : `Agent process error: ${error.message}`;
         this.cancelPendingPermissions();
         reject(new Error(message));
@@ -192,9 +235,10 @@ export class AgentSession {
     processError.catch(() => {});
 
     stderr.setEncoding("utf8");
-    stderr.on("data", (text: string) =>
-      this.emit({ type: "stderr", text }),
-    );
+    stderr.on("data", (text: string) => {
+      if (this.child !== child) return;
+      this.emit({ type: "stderr", text });
+    });
 
     child.on("exit", (code, signal) => {
       if (this.child !== child) return;
@@ -422,7 +466,10 @@ export class AgentSession {
     if (this.running) throw new Error("The agent is already responding.");
     this.running = true;
     try {
-      await this.start();
+      if (!this.launchTarget) {
+        throw new Error("No agent selected.");
+      }
+      await this.start(this.launchTarget);
       this.emit({ type: "turn-start" });
       if (!this.connection || !this.sessionId) {
         throw new Error("Agent session is not ready.");
@@ -696,11 +743,12 @@ export class AgentSession {
 
   private loginHint(method: acp.AuthMethod, error: unknown): string {
     const meta = method._meta?.["terminal-auth"] as TerminalAuthMeta | undefined;
-    const command = meta?.command
-      ? [meta.command, ...(meta.args ?? [])].join(" ")
-      : "copilot login";
     const reason = error instanceof Error ? ` (${error.message})` : "";
-    return `Sign-in required${reason}. Run \`${command}\` in a terminal, then press Restart.`;
+    if (meta?.command) {
+      const command = [meta.command, ...(meta.args ?? [])].join(" ");
+      return `Sign-in required${reason}. Run \`${command}\` in a terminal, then press Restart.`;
+    }
+    return `Sign-in required${reason}. Sign in with the selected agent in a terminal, then press Restart.`;
   }
 
   private assertSessionId(sessionId: acp.SessionId): void {

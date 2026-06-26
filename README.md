@@ -27,16 +27,41 @@ copilot login
 
 Defaults:
 
-- command: `copilot --acp --stdio`
+- A **GitHub Copilot** agent (`copilot --acp --stdio`) is seeded the first time the
+  package activates.
 - send host context: enabled
 
-If Pulsar cannot find `copilot`, set the full command line with an absolute
-path (keep the arguments) in:
+### Selecting and configuring agents
 
-```text
-Settings -> Packages -> pulsar-acp-agent -> Agent command
+The agent picker in the header (top-left) shows the active agent and lets you
+switch between configured agents or open **Edit agents…**. Switching stops the
+current agent and clears the conversation.
+
+Agents are stored in your Pulsar config file (`config.cson`) under the
+`pulsar-acp-agent` namespace and are managed from the picker or by editing the
+file directly:
+
+```cson
+"pulsar-acp-agent":
+  activeAgentId: "copilot"
+  agents:
+    copilot:
+      name: "GitHub Copilot"
+      command: "copilot --acp --stdio"
+    gemini:
+      name: "Gemini CLI"
+      command: "gemini --experimental-acp"
+  version: 1
 ```
 
+- `agents` maps a stable id to an agent `{ name, command }`.
+- `activeAgentId` selects which agent launches; it persists across reloads.
+- `command` is a full command line for an executable that speaks ACP over stdio.
+
+Run **Pulsar ACP Agent: Edit Agents** (also in the picker and the Packages menu)
+to open the config file. Changes apply on the next Restart or Switch.
+
+If Pulsar cannot find the executable, set its full absolute path in `command`.
 On Linux this may be something like:
 
 ```text
@@ -59,7 +84,8 @@ included in prompts.
 - Send: `Enter`
 - Newline: `Shift+Enter`
 - Stop: cancel current turn
-- Restart: button in the agent details panel (click the agent name)
+- Switch agent: agent picker in the header
+- Restart: button in the agent details panel (click **More...** in the header)
 
 ![Pulsar ACP Agent chat panel in Pulsar](docs/images/panel-idle.png)
 
@@ -68,10 +94,10 @@ images up to 5 MiB via the attachment button, drag-and-drop, or paste.
 
 ![Image attachment preview before sending a prompt](docs/images/image-attachment.png)
 
-Once connected, the header shows the agent's name. Click the name to open the agent
-details: version, advertised capabilities and metadata as key/value rows, and a
-Restart button. A status row below the header shows context-token usage when the
-agent reports it.
+Once connected, click **More...** in the header to show or hide the agent's
+self-reported name, version, advertised capabilities, and metadata as key/value
+rows, plus agent actions such as Restart. The same live row shows context-token
+usage when the agent reports it.
 
 ![Agent details showing version and capabilities](docs/images/agent-details.png)
 
@@ -140,6 +166,8 @@ Pulsar loads `lib/main.js`. Rebuild after editing `src/`, then reload Pulsar.
   status-bar service consumer.
 - `src/agent-view.ts` renders the panel UI.
 - `src/agent-session.ts` manages the ACP session via `@agentclientprotocol/sdk`.
+- `src/agent-config.ts` holds the pure agent-registry logic (normalize, migrate,
+  resolve) split out so it can be unit-tested without loading `atom`.
 - `src/util.ts` holds pure helpers (`parseCommandLine`, `TerminalRecord`) split
   out so they can be unit-tested without loading `atom`.
 

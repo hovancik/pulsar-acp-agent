@@ -2,10 +2,15 @@ name: CI
 
 on:
   push:
+    branches: [trunk]
   pull_request:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -20,5 +25,5 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
-      - run: git diff --exit-code lib/main.js lib/main.js.map lib/util.js lib/util.js.map
+      - run: git diff --exit-code lib/main.js lib/main.js.map lib/util.js lib/util.js.map lib/agent-config.js lib/agent-config.js.map
       - run: npm test
