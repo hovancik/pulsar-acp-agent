@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added per-session config option dropdowns in the footer for agent-exposed selectors such as model, custom agent, and reasoning effort (ACP `configOptions`).
 - Added a pinned, collapsible **Plan** bar above the composer that shows the agent's live ACP plan with progress and the current step, and snapshots completed plans into the conversation.
 - Added editor-context attachments: attach an image, the current selection, or the current file to a prompt from the composer, editor context menu, or commands.
+- Tool-call cards with a single file location and permission-prompt locations are now clickable, opening the file at the reported line.
 
 ### Changed
 

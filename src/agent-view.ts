@@ -96,11 +96,14 @@ type ToolUpdate = Extract<
 
 type ToolView = {
   element: HTMLElement;
+  heading: HTMLElement;
   title: HTMLElement;
   status: HTMLElement;
   body: HTMLElement;
   toggle: HTMLButtonElement;
   expanded: boolean;
+  location: acp.ToolCallLocation | null;
+  locationTooltip: Disposable | null;
 };
 
 type PendingImage = { id: number; data: string; mimeType: string; file: File };
@@ -336,6 +339,7 @@ export class PulsarAcpAgentView {
   private sessionsToggle!: HTMLButtonElement;
   private sessionsList!: HTMLElement;
   private sessionTooltips = new CompositeDisposable();
+  private conversationTooltips = new CompositeDisposable();
   private thumbnailTooltips = new CompositeDisposable();
   private sessionsListVisible = false;
   private knownSessions: acp.SessionInfo[] = [];
@@ -1435,6 +1439,8 @@ export class PulsarAcpAgentView {
 
   private resetConversationState(): void {
     this.toolViews.clear();
+    this.conversationTooltips.dispose();
+    this.conversationTooltips = new CompositeDisposable();
     this.terminalOutputs.clear();
     this.activePlanEntries = [];
     this.activePlanSessionId = null;
@@ -2341,6 +2347,37 @@ export class PulsarAcpAgentView {
     return path.relative(path.resolve(a), path.resolve(b)) === "";
   }
 
+  private async openLocation(
+    filePath: string,
+    line?: number | null,
+  ): Promise<void> {
+    if (!(await this.isOpenableFile(filePath))) {
+      atom.notifications.addWarning("Cannot open that location.", {
+        detail: filePath,
+      });
+      return;
+    }
+    try {
+      await atom.workspace.open(filePath, {
+        initialLine: line ?? undefined,
+        searchAllPanes: true,
+      });
+    } catch (error) {
+      atom.notifications.addWarning("Could not open file.", {
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async isOpenableFile(filePath: string): Promise<boolean> {
+    if (!(await this.session.isPathInProjectRoots(filePath))) return false;
+    try {
+      return (await fs.promises.stat(filePath)).isFile();
+    } catch {
+      return false;
+    }
+  }
+
   // ponytail: canvas, not <img src=blob:/data:>, to avoid the CodeQL
   // untrusted-URL-in-sink alert for user-selected images (see c29f767).
   // Don't "simplify" this back to an <img>.
@@ -2452,11 +2489,26 @@ export class PulsarAcpAgentView {
       element.appendChild(heading);
       element.appendChild(body);
       element.appendChild(toggle);
-      tool = { element, title, status, body, toggle, expanded: false };
+      tool = { element, heading, title, status, body, toggle, expanded: false, location: null, locationTooltip: null };
       const view = tool;
       toggle.addEventListener("click", () => {
         view.expanded = !view.expanded;
         this.applyToolExpansion(view);
+      });
+      const open = (): void => {
+        if (!view.location || view.title.dataset.link !== "true") return;
+        void this.openLocation(view.location.path, view.location.line);
+      };
+      title.addEventListener("click", open);
+      title.addEventListener("keydown", (event) => {
+        if (
+          view.location &&
+          view.title.dataset.link === "true" &&
+          (event.key === "Enter" || event.key === " ")
+        ) {
+          event.preventDefault();
+          open();
+        }
       });
       this.toolViews.set(update.toolCallId, tool);
       this.conversation.appendChild(element);
@@ -2465,6 +2517,11 @@ export class PulsarAcpAgentView {
 
     if (update.title) tool.title.textContent = update.title;
     if (update.kind) tool.element.dataset.kind = update.kind;
+    if (update.locations !== undefined) {
+      tool.location =
+        update.locations?.length === 1 ? update.locations[0] : null;
+      void this.applyToolLocation(tool);
+    }
     if (update.status) {
       tool.element.dataset.status = update.status;
       const statuses: Record<string, string> = {
@@ -2483,6 +2540,26 @@ export class PulsarAcpAgentView {
       this.updateToolOverflow(tool);
     }
     this.scrollToBottom();
+  }
+
+  private async applyToolLocation(tool: ToolView): Promise<void> {
+    const location = tool.location;
+    const link = location != null && (await this.isOpenableFile(location.path));
+    if (tool.location !== location || !tool.element.isConnected) return;
+    if (link === (tool.title.dataset.link === "true")) return;
+    tool.title.dataset.link = String(link);
+    tool.heading.classList.toggle("pulsar-acp-agent-tool-heading--link", link);
+    if (link) {
+      tool.title.setAttribute("role", "button");
+      tool.title.tabIndex = 0;
+      tool.locationTooltip = atom.tooltips.add(tool.title, { title: "Go to File" });
+      this.conversationTooltips.add(tool.locationTooltip);
+    } else {
+      tool.title.removeAttribute("role");
+      tool.title.removeAttribute("tabindex");
+      tool.locationTooltip?.dispose();
+      tool.locationTooltip = null;
+    }
   }
 
   private applyToolExpansion(tool: ToolView): void {
@@ -2840,9 +2917,16 @@ export class PulsarAcpAgentView {
       const locations = document.createElement("div");
       locations.classList.add("pulsar-acp-agent-permission-locations");
       for (const loc of toolCall.locations) {
-        const entry = document.createElement("div");
+        const entry = document.createElement("button");
+        entry.type = "button";
         entry.classList.add("pulsar-acp-agent-permission-location");
-        entry.textContent = loc.line != null ? `${loc.path}:${loc.line}` : loc.path;
+        entry.textContent = loc.line != null ? `${loc.path}:${loc.line + 1}` : loc.path;
+        this.conversationTooltips.add(
+          atom.tooltips.add(entry, { title: "Go to File" }),
+        );
+        entry.addEventListener("click", () => {
+          void this.openLocation(loc.path, loc.line);
+        });
         locations.appendChild(entry);
       }
       block.appendChild(locations);
@@ -3216,6 +3300,7 @@ export class PulsarAcpAgentView {
     }
     this.reporter?.clear(this);
     this.sessionTooltips.dispose();
+    this.conversationTooltips.dispose();
     this.thumbnailTooltips.dispose();
     this.contextTooltips.dispose();
     for (const selector of this.configSelectors) selector.dispose();

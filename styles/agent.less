@@ -475,6 +475,14 @@
     align-items: center;
   }
 
+  .pulsar-acp-agent-tool-heading--link .pulsar-acp-agent-tool-title {
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
   .pulsar-acp-agent-tool-status {
     margin-right: 6px;
   }
@@ -684,6 +692,19 @@
 
       &:last-child {
         margin-bottom: 0;
+      }
+    }
+
+    button.pulsar-acp-agent-permission-location {
+      display: block;
+      width: 100%;
+      border: none;
+      text-align: left;
+      color: inherit;
+      cursor: pointer;
+
+      &:hover {
+        text-decoration: underline;
       }
     }
   }
