@@ -84,11 +84,9 @@ interface TerminalAuthMeta {
   args?: string[];
 }
 
-// Builds an Error carrying a JSON-RPC error code for the ACP transport.
+// Builds an SDK error so the ACP transport preserves the JSON-RPC code.
 function rpcError(message: string, code: number): Error {
-  const error = new Error(message) as Error & { code?: number };
-  error.code = code;
-  return error;
+  return new acp.RequestError(code, message);
 }
 
 // True when `target` is one of `roots` or nested beneath one of them.
