@@ -1,4 +1,4 @@
-import { CompositeDisposable, Disposable, TextEditor } from "atom";
+import { CompositeDisposable, Disposable, DisplayMarker, TextEditor } from "atom";
 import * as fs from "fs";
 import * as path from "path";
 import * as acp from "@agentclientprotocol/sdk";
@@ -335,6 +335,15 @@ export class PulsarAcpAgentView {
   private stopButton!: HTMLButtonElement;
   private autoApproveButton!: HTMLButtonElement;
   private autoApprovePermissions = false;
+  private followButton!: HTMLButtonElement;
+  private followAgent = false;
+  private followGeneration = 0;
+  private followTargetPath: string | null = null;
+  private followTargetLine: number | null = null;
+  private followPending: { path: string; line?: number | null } | null = null;
+  private followTimer: ReturnType<typeof setTimeout> | null = null;
+  private followFlashTimer: ReturnType<typeof setTimeout> | null = null;
+  private followMarker: DisplayMarker | null = null;
   private newSessionButton!: HTMLButtonElement;
   private sessionsToggle!: HTMLButtonElement;
   private sessionsList!: HTMLElement;
@@ -756,6 +765,7 @@ export class PulsarAcpAgentView {
     this.sendButton.classList.add("pulsar-acp-agent-send");
     this.stopButton = this.makeButton("Stop", () => {
       this.setGeneratingState("stopping");
+      this.cancelPendingFollow();
       this.session.cancel();
     });
     this.stopButton.classList.add("pulsar-acp-agent-stop");
@@ -777,11 +787,34 @@ export class PulsarAcpAgentView {
           "Auto-approve permission prompts for this session using allow once.",
       }),
     );
+    this.followButton = document.createElement("button");
+    this.followButton.classList.add("btn", "pulsar-acp-agent-follow");
+    this.followButton.textContent = "Follow: Off";
+    this.followButton.setAttribute("aria-pressed", "false");
+    this.followButton.addEventListener("click", () => {
+      this.setFollowAgent(!this.followAgent);
+    });
+    this.subscriptions.add(
+      atom.tooltips.add(this.followButton, {
+        title:
+          "Follow the agent: open and scroll to each file it works on for this session.",
+      }),
+      atom.workspace.onDidChangeActiveTextEditor((editor) => {
+        if (!this.followAgent) return;
+        const activePath = editor?.getPath();
+        if (!activePath) return;
+        if (this.followTargetPath && this.samePath(activePath, this.followTargetPath)) {
+          return;
+        }
+        this.setFollowAgent(false);
+      }),
+    );
     actions.appendChild(this.buildContextControl());
     actions.appendChild(this.buildConfigSelectors());
 
     const actionButtons = document.createElement("div");
     actionButtons.classList.add("pulsar-acp-agent-action-buttons");
+    actionButtons.appendChild(this.followButton);
     actionButtons.appendChild(this.autoApproveButton);
     actionButtons.appendChild(this.stopButton);
     actionButtons.appendChild(this.sendButton);
@@ -943,6 +976,129 @@ export class PulsarAcpAgentView {
           this.updateConfigSelectorsDisabled();
         }
       });
+  }
+
+  private setFollowAgent(on: boolean): void {
+    this.followAgent = on;
+    if (!on) this.clearFollowEffects();
+    this.updateFollowButton();
+  }
+
+  private updateFollowButton(): void {
+    this.followButton.setAttribute("aria-pressed", String(this.followAgent));
+    this.followButton.textContent = this.followAgent
+      ? "Follow: On"
+      : "Follow: Off";
+    this.followButton.classList.toggle(
+      "pulsar-acp-agent-follow--on",
+      this.followAgent,
+    );
+  }
+
+  private clearFollowEffects(): void {
+    this.cancelPendingFollow();
+    if (this.followFlashTimer !== null) {
+      clearTimeout(this.followFlashTimer);
+      this.followFlashTimer = null;
+    }
+    this.followTargetPath = null;
+    this.followTargetLine = null;
+    this.followMarker?.destroy();
+    this.followMarker = null;
+  }
+
+  // Drops a queued or in-flight follow open without touching the Follow toggle
+  // or current highlight; the generation bump invalidates an open mid-await.
+  private cancelPendingFollow(): void {
+    this.followGeneration++;
+    if (this.followTimer !== null) {
+      clearTimeout(this.followTimer);
+      this.followTimer = null;
+    }
+    this.followPending = null;
+  }
+
+  // Trailing-edge throttle: stream many updates, follow only the latest
+  // location. Dedupe on path AND line so the current spot isn't re-opened per
+  // streamed token, while a new line in the same file still re-centers.
+  private scheduleFollow(filePath: string, line?: number | null): void {
+    if (
+      this.followTargetPath &&
+      this.samePath(filePath, this.followTargetPath) &&
+      (line ?? null) === this.followTargetLine
+    ) {
+      return;
+    }
+    this.followPending = { path: filePath, line };
+    if (this.followTimer !== null) return;
+    this.followTimer = setTimeout(() => {
+      this.followTimer = null;
+      const pending = this.followPending;
+      this.followPending = null;
+      if (pending) void this.followLocation(pending.path, pending.line);
+    }, 150);
+  }
+
+  private async followLocation(
+    filePath: string,
+    line?: number | null,
+  ): Promise<void> {
+    const generation = ++this.followGeneration;
+    const sessionId = this.session.sessionId;
+    if (!(await this.isOpenableFile(filePath))) return;
+    if (
+      generation !== this.followGeneration ||
+      !this.followAgent ||
+      this.session.sessionId !== sessionId
+    ) {
+      return;
+    }
+    // Mark the target before awaiting open so the active-editor change the open
+    // may trigger is recognized as our own and doesn't auto-unfollow.
+    this.followTargetPath = filePath;
+    this.followTargetLine = line ?? null;
+    let editor: unknown;
+    try {
+      editor = await atom.workspace.open(filePath, {
+        searchAllPanes: true,
+        activatePane: false,
+      });
+    } catch {
+      return;
+    }
+    if (
+      generation !== this.followGeneration ||
+      !this.followAgent ||
+      this.session.sessionId !== sessionId ||
+      // A non-text item (e.g. an image opens as an ImageEditor) has no buffer
+      // to scroll; skip it rather than crashing on a bad cast.
+      !(editor instanceof TextEditor)
+    ) {
+      return;
+    }
+    // ACP line is 0-based, matching Atom's buffer rows; do not offset.
+    const row = line ?? 0;
+    editor.scrollToBufferPosition([row, 0], { center: true });
+    this.flashFollowLine(editor, row);
+  }
+
+  private flashFollowLine(editor: TextEditor, row: number): void {
+    this.followMarker?.destroy();
+    if (this.followFlashTimer !== null) clearTimeout(this.followFlashTimer);
+    const marker = editor.markBufferRange([
+      [row, 0],
+      [row, 0],
+    ]);
+    editor.decorateMarker(marker, {
+      type: "line",
+      class: "pulsar-acp-agent-follow-flash",
+    });
+    this.followMarker = marker;
+    this.followFlashTimer = setTimeout(() => {
+      this.followFlashTimer = null;
+      marker.destroy();
+      if (this.followMarker === marker) this.followMarker = null;
+    }, 1200);
   }
 
   private updateAutoApproveButton(): void {
@@ -1197,6 +1353,7 @@ export class PulsarAcpAgentView {
     this.stopButton.disabled = true;
     this.autoApprovePermissions = false;
     this.updateAutoApproveButton();
+    this.setFollowAgent(false);
   }
 
   private restart(): void {
@@ -1461,6 +1618,7 @@ export class PulsarAcpAgentView {
     if (this.session.running || this.session.switching) return;
     this.autoApprovePermissions = false;
     this.updateAutoApproveButton();
+    this.setFollowAgent(false);
     // Cache the outgoing conversation: the agent keeps it loaded, so returning
     // to it must restore this DOM rather than re-load (which the agent rejects).
     const currentId = this.session.sessionId;
@@ -1488,6 +1646,7 @@ export class PulsarAcpAgentView {
     if (this.session.running || this.session.switching) return;
     this.autoApprovePermissions = false;
     this.updateAutoApproveButton();
+    this.setFollowAgent(false);
     this.hideLoadingOverlay();
     const currentId = this.session.sessionId;
     const info = this.knownSessions.find((s) => s.sessionId === id);
@@ -2521,6 +2680,9 @@ export class PulsarAcpAgentView {
       tool.location =
         update.locations?.length === 1 ? update.locations[0] : null;
       void this.applyToolLocation(tool);
+      if (this.followAgent && tool.location) {
+        this.scheduleFollow(tool.location.path, tool.location.line);
+      }
     }
     if (update.status) {
       tool.element.dataset.status = update.status;
@@ -3295,6 +3457,7 @@ export class PulsarAcpAgentView {
 
   destroy(): void {
     this.disconnectStartObserver();
+    this.clearFollowEffects();
     if (this.streamRenderHandle !== null) {
       cancelAnimationFrame(this.streamRenderHandle);
     }

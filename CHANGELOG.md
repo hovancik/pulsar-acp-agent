@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a pinned, collapsible **Plan** bar above the composer that shows the agent's live ACP plan with progress and the current step, and snapshots completed plans into the conversation.
 - Added editor-context attachments: attach an image, the current selection, or the current file to a prompt from the composer, editor context menu, or commands.
 - Tool-call cards with a single file location and permission-prompt locations are now clickable, opening the file at the reported line.
+- Added an opt-in **Follow** toggle in the footer: while on, the editor opens and scrolls to each file the agent works on. It turns off automatically when you navigate to another file.
 
 ### Changed
 
