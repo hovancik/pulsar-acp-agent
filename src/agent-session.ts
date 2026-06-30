@@ -4,7 +4,7 @@ import spawn from "cross-spawn";
 import * as fs from "fs";
 import * as path from "path";
 import { Readable, Writable } from "stream";
-import { TextEditor } from "atom";
+import type { TextEditor } from "atom";
 import * as acp from "@agentclientprotocol/sdk";
 import { parseCommandLine, TerminalRecord, buildContextBlock, ContextAttachment } from "./util";
 
@@ -58,6 +58,7 @@ export type AgentEvent =
   | { type: "turn-start" }
   | { type: "turn-end"; stopReason?: acp.StopReason }
   | { type: "update"; sessionId: acp.SessionId; update: acp.SessionUpdate }
+  | { type: "permissions-cancelled" }
   | {
       type: "permission";
       params: acp.RequestPermissionRequest;
@@ -84,11 +85,9 @@ interface TerminalAuthMeta {
   args?: string[];
 }
 
-// Builds an Error carrying a JSON-RPC error code for the ACP transport.
+// Builds an SDK error so the ACP transport preserves the JSON-RPC code.
 function rpcError(message: string, code: number): Error {
-  const error = new Error(message) as Error & { code?: number };
-  error.code = code;
-  return error;
+  return new acp.RequestError(code, message);
 }
 
 // True when `target` is one of `roots` or nested beneath one of them.
@@ -139,7 +138,7 @@ export class AgentSession {
   }
 
   // The agent this session actually spawned (display-only snapshot). Stays set
-  // after exit so the header can keep showing the agent's name.
+  // after a ready session exits so the header can keep showing the agent's name.
   get launchedAgent(): LaunchTarget | null {
     return this.startedTarget;
   }
@@ -170,7 +169,7 @@ export class AgentSession {
     }
     this.launchTarget = target;
     const pending = this._start().catch((error) => {
-      if (this.starting === pending) this.starting = null;
+      if (this.starting === pending) this.cleanupFailedStartup();
       throw error;
     });
     this.starting = pending;
@@ -185,6 +184,9 @@ export class AgentSession {
       this.child = null;
       this.connection = null;
       this.sessionCwd = null;
+      this.authMethods = [];
+      this.agentCapabilities = null;
+      this.promptCapabilities = null;
       this.cancelPendingPermissions();
       this.cleanupTerminals();
       this.loadedSessionIds.clear();
@@ -242,14 +244,20 @@ export class AgentSession {
 
     child.on("exit", (code, signal) => {
       if (this.child !== child) return;
+      const hadSession = this.sessionId != null;
       this.child = null;
       this.connection = null;
       this.sessionId = null;
       this.sessionCwd = null;
       this.starting = null;
+      if (!hadSession) {
+        this.launchTarget = null;
+        this.startedTarget = null;
+      }
       this.running = false;
       this.switching = false;
       this.pendingSessionId = null;
+      this.authMethods = [];
       this.agentCapabilities = null;
       this.promptCapabilities = null;
       this.cancelPendingPermissions();
@@ -343,6 +351,31 @@ export class AgentSession {
       this.sessionConfigOptions.set(session.sessionId, session.configOptions);
     this.emit({ type: "ready", source: "start" });
     this.refreshSessionList();
+  }
+
+  private cleanupFailedStartup(): void {
+    if (this.child) {
+      try {
+        this.child.kill("SIGTERM");
+      } catch {}
+      this.child = null;
+    }
+    this.connection = null;
+    this.sessionId = null;
+    this.sessionCwd = null;
+    this.starting = null;
+    this.launchTarget = null;
+    this.startedTarget = null;
+    this.running = false;
+    this.switching = false;
+    this.pendingSessionId = null;
+    this.authMethods = [];
+    this.agentCapabilities = null;
+    this.promptCapabilities = null;
+    this.cancelPendingPermissions();
+    this.cleanupTerminals();
+    this.loadedSessionIds.clear();
+    this.sessionConfigOptions.clear();
   }
 
   private cwd(): string {
@@ -508,10 +541,12 @@ export class AgentSession {
       });
       // Clear `running` before emitting so listeners that re-render controls
       // (e.g. the "+ New" button) see the idle state. The finally is a safety net.
+      this.cancelPendingPermissions();
       this.running = false;
       this.emit({ type: "turn-end", stopReason: result?.stopReason });
       return result;
     } catch (error) {
+      this.cancelPendingPermissions();
       this.running = false;
       this.emit({ type: "turn-end" });
       throw error;
@@ -537,10 +572,12 @@ export class AgentSession {
   }
 
   private cancelPendingPermissions(): void {
+    if (this.permissionResolvers.size === 0) return;
     for (const resolve of this.permissionResolvers) {
       resolve({ outcome: { outcome: "cancelled" } });
     }
     this.permissionResolvers.clear();
+    this.emit({ type: "permissions-cancelled" });
   }
 
   private buildClient(): acp.Client {
