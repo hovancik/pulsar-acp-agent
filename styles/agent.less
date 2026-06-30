@@ -804,6 +804,7 @@
 .pulsar-acp-agent-config-trigger,
 .pulsar-acp-agent-context-trigger,
 .pulsar-acp-agent-auto-approve,
+.pulsar-acp-agent-follow,
 .pulsar-acp-agent-stop {
   font-size: 0.85em;
   background: none;
@@ -816,11 +817,22 @@
   }
 }
 
-.pulsar-acp-agent-auto-approve {
-  // First control of the button row; pushes Stop and Send to the right while it
-  // stays on the left.
+.pulsar-acp-agent-follow {
+  // First control of the button row; pushes the rest to the right.
   margin-right: auto;
 
+  &.pulsar-acp-agent-follow--on {
+    color: @text-color-info;
+    border-color: @text-color-info;
+    background-color: fade(@text-color-info, 10%);
+
+    &:hover {
+      background-color: fade(@text-color-info, 20%);
+    }
+  }
+}
+
+.pulsar-acp-agent-auto-approve {
   &.pulsar-acp-agent-auto-approve--on {
     color: @text-color-warning;
     border-color: @text-color-warning;
@@ -830,6 +842,11 @@
       background-color: fade(@text-color-warning, 20%);
     }
   }
+}
+
+// Transient highlight on the line the agent is working on while following.
+atom-text-editor .line.pulsar-acp-agent-follow-flash {
+  background-color: fade(@text-color-info, 22%);
 }
 
 .pulsar-acp-agent-send {

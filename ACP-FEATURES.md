@@ -70,7 +70,7 @@ terminal whose output is shown in the panel.
 | `agent_message_chunk` | ✅ | Streamed assistant text. |
 | `agent_thought_chunk` | ✅ | Reasoning, rendered distinctly. |
 | `user_message_chunk` | ✅ | Echoed user content. |
-| `tool_call` / `tool_call_update` | ✅ | Rendered with title, status, and content. A single file `location` makes the tool title clickable to open it at the line. Permission prompts extract command/URL from `rawInput`, list clickable locations, and include a collapsible raw-input section. |
+| `tool_call` / `tool_call_update` | ✅ | Rendered with title, status, and content. A single file `location` makes the tool title clickable to open it at the line, and drives the opt-in **Follow** toggle that scrolls the editor to the agent's current file. Permission prompts extract command/URL from `rawInput`, list clickable locations, and include a collapsible raw-input section. |
 | `plan` | ✅ | Execution plan list. |
 | `current_mode_update` | ⬜ | Not surfaced directly; agents that expose mode as a session config option drive it through the selectors below. |
 | `usage_update` | ✅ | Context-token usage shown in the header live row. |
