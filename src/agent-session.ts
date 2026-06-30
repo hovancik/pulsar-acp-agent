@@ -137,7 +137,7 @@ export class AgentSession {
   }
 
   // The agent this session actually spawned (display-only snapshot). Stays set
-  // after exit so the header can keep showing the agent's name.
+  // after a ready session exits so the header can keep showing the agent's name.
   get launchedAgent(): LaunchTarget | null {
     return this.startedTarget;
   }
@@ -168,7 +168,7 @@ export class AgentSession {
     }
     this.launchTarget = target;
     const pending = this._start().catch((error) => {
-      if (this.starting === pending) this.starting = null;
+      if (this.starting === pending) this.cleanupFailedStartup();
       throw error;
     });
     this.starting = pending;
@@ -183,6 +183,9 @@ export class AgentSession {
       this.child = null;
       this.connection = null;
       this.sessionCwd = null;
+      this.authMethods = [];
+      this.agentCapabilities = null;
+      this.promptCapabilities = null;
       this.cancelPendingPermissions();
       this.cleanupTerminals();
       this.loadedSessionIds.clear();
@@ -240,14 +243,20 @@ export class AgentSession {
 
     child.on("exit", (code, signal) => {
       if (this.child !== child) return;
+      const hadSession = this.sessionId != null;
       this.child = null;
       this.connection = null;
       this.sessionId = null;
       this.sessionCwd = null;
       this.starting = null;
+      if (!hadSession) {
+        this.launchTarget = null;
+        this.startedTarget = null;
+      }
       this.running = false;
       this.switching = false;
       this.pendingSessionId = null;
+      this.authMethods = [];
       this.agentCapabilities = null;
       this.promptCapabilities = null;
       this.cancelPendingPermissions();
@@ -341,6 +350,31 @@ export class AgentSession {
       this.sessionConfigOptions.set(session.sessionId, session.configOptions);
     this.emit({ type: "ready", source: "start" });
     this.refreshSessionList();
+  }
+
+  private cleanupFailedStartup(): void {
+    if (this.child) {
+      try {
+        this.child.kill("SIGTERM");
+      } catch {}
+      this.child = null;
+    }
+    this.connection = null;
+    this.sessionId = null;
+    this.sessionCwd = null;
+    this.starting = null;
+    this.launchTarget = null;
+    this.startedTarget = null;
+    this.running = false;
+    this.switching = false;
+    this.pendingSessionId = null;
+    this.authMethods = [];
+    this.agentCapabilities = null;
+    this.promptCapabilities = null;
+    this.cancelPendingPermissions();
+    this.cleanupTerminals();
+    this.loadedSessionIds.clear();
+    this.sessionConfigOptions.clear();
   }
 
   private cwd(): string {

@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Session history list now takes less vertical space.
 - Refined the composer footer styling and layout.
 
+### Fixed
+
+- Failed agent startup now fully resets transient session state before retrying.
+
 ## [0.2.0] - 2026-06-21
 
 ### Added
