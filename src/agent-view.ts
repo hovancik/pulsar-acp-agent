@@ -34,6 +34,7 @@ const CFG_VERSION = "pulsar-acp-agent.version";
 const CFG_ACTIVE = "pulsar-acp-agent.activeAgentId";
 const CFG_AGENTS = "pulsar-acp-agent.agents";
 const CFG_LEGACY_COMMAND = "pulsar-acp-agent.command";
+const TEXT_NODE_TYPE = 3;
 let nextAgentMenuId = 1;
 
 function rawAgentsConfig(): Record<string, unknown> {
@@ -1824,6 +1825,9 @@ export class PulsarAcpAgentView {
       case "permission":
         this.renderPermission(event.params, event.respond);
         break;
+      case "permissions-cancelled":
+        this.markPendingPermissionsCancelled();
+        break;
       case "file-written":
         this.appendNote(`Wrote ${event.path}`);
         break;
@@ -3017,6 +3021,40 @@ export class PulsarAcpAgentView {
     this.setActivePlan(entries, this.session.sessionId);
   }
 
+  private markPendingPermissionsCancelled(): void {
+    const blocks = Array.from(
+      this.conversation.querySelectorAll(
+        ".pulsar-acp-agent-permission:not([data-resolved])",
+      ),
+    ) as HTMLElement[];
+    for (const block of blocks) {
+      block.dataset.resolved = "cancelled";
+      const question = block.querySelector(
+        ".pulsar-acp-agent-permission-question",
+      ) as HTMLElement | null;
+      if (question) {
+        this.setPermissionQuestionText(
+          question,
+          `Cancelled \u2014 ${block.dataset.toolTitle || "an action"}`,
+        );
+      }
+      const buttons = Array.from(
+        block.querySelectorAll(".pulsar-acp-agent-permission-options button"),
+      ) as HTMLButtonElement[];
+      for (const button of buttons) {
+        button.disabled = true;
+      }
+    }
+  }
+
+  private setPermissionQuestionText(question: HTMLElement, text: string): void {
+    const textNode = Array.from(question.childNodes).find(
+      (node) => node.nodeType === TEXT_NODE_TYPE,
+    );
+    if (textNode) textNode.textContent = ` ${text}`;
+    else question.appendChild(document.createTextNode(` ${text}`));
+  }
+
   private renderPermission(
     params: acp.RequestPermissionRequest,
     respond: (outcome: acp.RequestPermissionResponse) => void,
@@ -3042,6 +3080,7 @@ export class PulsarAcpAgentView {
 
     const block = document.createElement("div");
     block.classList.add("pulsar-acp-agent-permission");
+    block.dataset.toolTitle = toolTitle;
     if (toolCall?.kind) block.dataset.kind = toolCall.kind;
 
     const kindIcons: Record<string, string> = {

@@ -58,6 +58,7 @@ export type AgentEvent =
   | { type: "turn-start" }
   | { type: "turn-end"; stopReason?: acp.StopReason }
   | { type: "update"; sessionId: acp.SessionId; update: acp.SessionUpdate }
+  | { type: "permissions-cancelled" }
   | {
       type: "permission";
       params: acp.RequestPermissionRequest;
@@ -540,10 +541,12 @@ export class AgentSession {
       });
       // Clear `running` before emitting so listeners that re-render controls
       // (e.g. the "+ New" button) see the idle state. The finally is a safety net.
+      this.cancelPendingPermissions();
       this.running = false;
       this.emit({ type: "turn-end", stopReason: result?.stopReason });
       return result;
     } catch (error) {
+      this.cancelPendingPermissions();
       this.running = false;
       this.emit({ type: "turn-end" });
       throw error;
@@ -569,10 +572,12 @@ export class AgentSession {
   }
 
   private cancelPendingPermissions(): void {
+    if (this.permissionResolvers.size === 0) return;
     for (const resolve of this.permissionResolvers) {
       resolve({ outcome: { outcome: "cancelled" } });
     }
     this.permissionResolvers.clear();
+    this.emit({ type: "permissions-cancelled" });
   }
 
   private buildClient(): acp.Client {
