@@ -4,7 +4,7 @@ import spawn from "cross-spawn";
 import * as fs from "fs";
 import * as path from "path";
 import { Readable, Writable } from "stream";
-import { TextEditor } from "atom";
+import type { TextEditor } from "atom";
 import * as acp from "@agentclientprotocol/sdk";
 import { parseCommandLine, TerminalRecord, buildContextBlock, ContextAttachment } from "./util";
 
