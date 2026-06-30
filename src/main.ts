@@ -220,7 +220,10 @@ export function activate(): void {
 
 export function consumeStatusBar(statusBar: StatusBar): Disposable {
   getIndicator().setStatusBar(statusBar);
-  return new Disposable(() => indicator?.destroy());
+  return new Disposable(() => {
+    indicator?.destroy();
+    indicator = null;
+  });
 }
 
 // Registered through the package.json "deserializers" field so Pulsar can
