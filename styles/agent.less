@@ -142,6 +142,68 @@
   background-color: @overlay-border-color;
 }
 
+// Slash-command popup — reuses the picker menu/item look, anchored above the composer.
+.pulsar-acp-agent-slash-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.pulsar-acp-agent-slash-menu {
+  top: auto;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  max-width: none;
+  margin: 0 0 2px 0;
+  max-height: 16em;
+  overflow-y: auto;
+}
+
+.pulsar-acp-agent-slash-item {
+  display: flex;
+  align-items: baseline;
+  gap: (@component-padding / 2);
+  white-space: normal;
+
+  .pulsar-acp-agent-slash-name {
+    flex: 0 0 auto;
+    font-weight: 600;
+  }
+
+  .pulsar-acp-agent-slash-desc {
+    flex: 1 1 auto;
+    font-weight: normal;
+    color: @text-color-subtle;
+    font-size: 0.85em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &.is-active {
+    background-color: @background-color-highlight;
+    color: @text-color-highlight;
+
+    // The picker uses is-active for the selected agent and draws a checkmark;
+    // here it's just the keyboard highlight, so suppress the mark.
+    &::before {
+      content: none;
+    }
+
+    .pulsar-acp-agent-slash-desc {
+      color: @text-color-highlight;
+    }
+  }
+}
+
+.pulsar-acp-agent-slash-hint {
+  margin-top: (@component-padding / 4);
+  color: @text-color-subtle;
+  font-size: 0.85em;
+  font-style: italic;
+}
+
 .pulsar-acp-agent-header-row2 {
   display: flex;
   align-items: baseline;

@@ -324,6 +324,13 @@ export class PulsarAcpAgentView {
   private lifecycleStatus = "";
   private agentExited = false;
   private input!: HTMLTextAreaElement;
+  private slashMenu!: HTMLElement;
+  private slashHint!: HTMLElement;
+  private readonly slashMenuId = `pulsar-acp-agent-slash-menu-${nextAgentMenuId++}`;
+  private slashMenuOpen = false;
+  private slashMatches: acp.AvailableCommand[] = [];
+  private slashActiveIndex = 0;
+  private slashHintCommand: string | null = null;
   private fileInput!: HTMLInputElement;
   private thumbnailStrip!: HTMLElement;
   private conversation!: HTMLElement;
@@ -699,12 +706,16 @@ export class PulsarAcpAgentView {
       "placeholder",
       "Ask the agent\u2026  (Enter to send, Shift+Enter for newline)",
     );
+    this.input.setAttribute("aria-controls", this.slashMenuId);
     this.input.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return; // IME composing
+      if (this.handleSlashKeydown(event)) return;
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         this.send();
       }
     });
+    this.input.addEventListener("input", () => this.updateSlashMenu());
     this.input.addEventListener("paste", (event: ClipboardEvent) => {
       const items = event.clipboardData?.items;
       if (!items || !this.canAcceptImages()) return;
@@ -806,7 +817,7 @@ export class PulsarAcpAgentView {
     footer.appendChild(this.fileInput);
     footer.appendChild(this.contextStrip);
     footer.appendChild(this.thumbnailStrip);
-    footer.appendChild(this.input);
+    footer.appendChild(this.buildSlashComposer());
     footer.appendChild(actions);
     footer.appendChild(actionButtons);
 
@@ -1233,7 +1244,200 @@ export class PulsarAcpAgentView {
   }
 
   private send(): void {
+    if (this.isComposerBusy()) return;
+    this.closeSlashMenu();
+    this.hideSlashHint();
     void this.sendPrompt();
+  }
+
+  private buildSlashComposer(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.classList.add("pulsar-acp-agent-slash-wrap");
+
+    this.slashMenu = document.createElement("div");
+    this.slashMenu.classList.add(
+      "pulsar-acp-agent-picker-menu",
+      "pulsar-acp-agent-slash-menu",
+    );
+    this.slashMenu.id = this.slashMenuId;
+    this.slashMenu.setAttribute("role", "listbox");
+    this.slashMenu.setAttribute("aria-label", "Slash commands");
+    this.slashMenu.style.display = "none";
+
+    this.slashHint = document.createElement("div");
+    this.slashHint.classList.add("pulsar-acp-agent-slash-hint");
+    this.slashHint.style.display = "none";
+
+    wrap.appendChild(this.slashMenu);
+    wrap.appendChild(this.input);
+    wrap.appendChild(this.slashHint);
+
+    const onDocPointerDown = (event: MouseEvent) => {
+      if (this.slashMenuOpen && !wrap.contains(event.target as Node)) {
+        this.closeSlashMenu();
+      }
+    };
+    document.addEventListener("mousedown", onDocPointerDown, true);
+    this.subscriptions.add(
+      new Disposable(() =>
+        document.removeEventListener("mousedown", onDocPointerDown, true),
+      ),
+    );
+    return wrap;
+  }
+
+  private isComposerBusy(): boolean {
+    return (
+      this.session.running ||
+      this.session.switching ||
+      this.preparingPrompt ||
+      this.pendingImageLoads > 0
+    );
+  }
+
+  private slashQuery(): string | null {
+    const match = /^\/(\S*)$/.exec(this.input.value);
+    return match ? match[1] : null;
+  }
+
+  private updateSlashMenu(): void {
+    if (
+      !this.slashHintCommand ||
+      !this.input.value.startsWith(`/${this.slashHintCommand} `)
+    ) {
+      this.hideSlashHint();
+    }
+    const query = this.slashQuery();
+    if (query === null || this.isComposerBusy()) {
+      this.closeSlashMenu();
+      return;
+    }
+    const lower = query.toLowerCase();
+    const matches = this.session
+      .currentAvailableCommands()
+      .filter((command) => command.name.toLowerCase().startsWith(lower));
+    if (matches.length === 0) {
+      // Permissive: leave closed so an unknown "/foo" falls through to send.
+      this.closeSlashMenu();
+      return;
+    }
+    this.slashMatches = matches;
+    this.slashActiveIndex = 0;
+    this.slashMenuOpen = true;
+    this.renderSlashMenu();
+    this.slashMenu.style.display = "";
+  }
+
+  private renderSlashMenu(): void {
+    this.slashMenu.innerHTML = "";
+    this.slashMatches.forEach((command, index) => {
+      const item = document.createElement("button");
+      item.classList.add(
+        "pulsar-acp-agent-picker-item",
+        "pulsar-acp-agent-slash-item",
+      );
+      item.id = `${this.slashMenuId}-item-${index}`;
+      item.setAttribute("role", "option");
+      item.tabIndex = -1;
+
+      const name = document.createElement("span");
+      name.classList.add("pulsar-acp-agent-slash-name");
+      name.textContent = `/${command.name}`;
+      item.appendChild(name);
+      if (command.description) {
+        const desc = document.createElement("span");
+        desc.classList.add("pulsar-acp-agent-slash-desc");
+        desc.textContent = command.description;
+        item.appendChild(desc);
+      }
+      // preventDefault keeps focus in the textarea; a click would blur it first.
+      item.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        this.acceptSlashCommand(command);
+      });
+      this.slashMenu.appendChild(item);
+    });
+    this.applySlashActive();
+  }
+
+  // Toggle the active row in place instead of rebuilding the list each keypress.
+  private applySlashActive(): void {
+    const items = Array.from(this.slashMenu.children) as HTMLElement[];
+    items.forEach((item, index) => {
+      const active = index === this.slashActiveIndex;
+      item.classList.toggle("is-active", active);
+      item.setAttribute("aria-selected", active ? "true" : "false");
+      if (active) item.scrollIntoView({ block: "nearest" });
+    });
+    this.input.setAttribute(
+      "aria-activedescendant",
+      `${this.slashMenuId}-item-${this.slashActiveIndex}`,
+    );
+  }
+
+  private moveSlashActive(delta: number): void {
+    const count = this.slashMatches.length;
+    if (count === 0) return;
+    this.slashActiveIndex = (this.slashActiveIndex + delta + count) % count;
+    this.applySlashActive();
+  }
+
+  private handleSlashKeydown(event: KeyboardEvent): boolean {
+    if (!this.slashMenuOpen || this.slashMatches.length === 0) return false;
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        this.moveSlashActive(1);
+        return true;
+      case "ArrowUp":
+        event.preventDefault();
+        this.moveSlashActive(-1);
+        return true;
+      case "Enter":
+        if (event.shiftKey) return false;
+        event.preventDefault();
+        this.acceptSlashCommand(this.slashMatches[this.slashActiveIndex]);
+        return true;
+      case "Tab":
+        event.preventDefault();
+        this.acceptSlashCommand(this.slashMatches[this.slashActiveIndex]);
+        return true;
+      case "Escape":
+        event.preventDefault();
+        this.closeSlashMenu();
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private acceptSlashCommand(command: acp.AvailableCommand): void {
+    this.closeSlashMenu();
+    this.input.value = `/${command.name} `;
+    this.input.focus();
+    if (command.input) {
+      this.slashHintCommand = command.name;
+      this.slashHint.textContent = command.input.hint;
+      this.slashHint.style.display = "";
+      return;
+    }
+    this.send();
+  }
+
+  private closeSlashMenu(): void {
+    if (!this.slashMenuOpen) return;
+    this.slashMenuOpen = false;
+    this.slashMatches = [];
+    this.slashActiveIndex = 0;
+    this.slashMenu.style.display = "none";
+    this.slashMenu.innerHTML = "";
+    this.input.removeAttribute("aria-activedescendant");
+  }
+
+  private hideSlashHint(): void {
+    this.slashHintCommand = null;
+    this.slashHint.style.display = "none";
+    this.slashHint.textContent = "";
   }
 
   private async sendPrompt(): Promise<void> {
@@ -1242,10 +1446,7 @@ export class PulsarAcpAgentView {
       (text.length === 0 &&
         this.pendingImages.length === 0 &&
         this.pendingContext.length === 0) ||
-      this.session.running ||
-      this.session.switching ||
-      this.preparingPrompt ||
-      this.pendingImageLoads > 0
+      this.isComposerBusy()
     )
       return;
 
@@ -1327,6 +1528,8 @@ export class PulsarAcpAgentView {
     );
     this.subscriptions.add(this.eventSubscription);
     this.clearConversation();
+    this.closeSlashMenu();
+    this.hideSlashHint();
     this.imageSupportKnown = false;
     this.supportsImages = false;
     this.contextControl.style.display = "none";
@@ -1600,6 +1803,8 @@ export class PulsarAcpAgentView {
 
   private startNewSession(): void {
     if (this.session.running || this.session.switching) return;
+    this.closeSlashMenu();
+    this.hideSlashHint();
     this.autoApprovePermissions = false;
     this.updateAutoApproveButton();
     this.setFollowAgent(false);
@@ -1650,6 +1855,8 @@ export class PulsarAcpAgentView {
 
   private switchToSession(id: string): void {
     if (this.session.running || this.session.switching) return;
+    this.closeSlashMenu();
+    this.hideSlashHint();
     this.autoApprovePermissions = false;
     this.updateAutoApproveButton();
     this.setFollowAgent(false);
@@ -1803,6 +2010,7 @@ export class PulsarAcpAgentView {
         this.renderSessionsList(event.sessions);
         break;
       case "turn-start":
+        this.closeSlashMenu();
         this.clearCompletedActivePlanEntries();
         this.setAgentStatus("working");
         this.stopButton.disabled = false;
@@ -1853,6 +2061,8 @@ export class PulsarAcpAgentView {
         break;
       case "exit": {
         if (this.agentExited) break;
+        this.closeSlashMenu();
+        this.hideSlashHint();
         this.hideLoadingOverlay();
         this.setGeneratingState(null);
         const detail = `exited${event.code != null ? ` (code ${event.code})` : ""}`;
@@ -1897,6 +2107,9 @@ export class PulsarAcpAgentView {
         break;
       case "config_option_update":
         this.renderConfigSelectors();
+        break;
+      case "available_commands_update":
+        this.updateSlashMenu();
         break;
       case "usage_update":
         if (

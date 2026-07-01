@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added editor-context attachments: attach an image, the current selection, or the current file to a prompt from the composer, editor context menu, or commands.
 - Tool-call cards with a single file location and permission-prompt locations are now clickable, opening the file at the reported line.
 - Added an opt-in **Follow** toggle in the footer: while on, the editor opens and scrolls to each file the agent works on. It turns off automatically when you navigate to another file.
+- Added slash-command completion: type `/` at the start of the composer to pick from the commands the agent advertises (ACP `available_commands_update`). Argument-less commands send immediately; commands that take an argument insert `/name ` and show the agent's hint.
 
 ### Changed
 
