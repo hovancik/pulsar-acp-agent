@@ -62,7 +62,7 @@
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
-    "@agentclientprotocol/sdk": "^0.28.1",
+    "@agentclientprotocol/sdk": "^1.1.0",
     "@types/atom": "npm:@pulsar-edit/types@^1.132.0",
     "@types/cross-spawn": "^6.0.6",
     "@types/node": "^20.19.0",
@@ -71,7 +71,7 @@
     "esbuild": "^0.28.0",
     "marked": "^18.0.5",
     "typescript": "^5.6.3",
-    "zod": "^3.25.76"
+    "zod": "^4.4.3"
   },
   "configSchema": {
     "sendHostContext": {

@@ -6,8 +6,8 @@ This package bundles third-party code into `lib/main.js`.
 
 | Package | Version | License | Repository |
 | --- | --- | --- | --- |
-| `@agentclientprotocol/sdk` | 0.25.0 | Apache-2.0 | https://github.com/agentclientprotocol/typescript-sdk |
-| `zod` | 3.25.76 | MIT | https://github.com/colinhacks/zod |
+| `@agentclientprotocol/sdk` | 1.1.0 | Apache-2.0 | https://github.com/agentclientprotocol/typescript-sdk |
+| `zod` | 4.4.3 | MIT | https://github.com/colinhacks/zod |
 | `cross-spawn` | 7.0.6 | MIT | https://github.com/moxystudio/node-cross-spawn |
 | `dompurify` | 3.4.11 | MPL-2.0 OR Apache-2.0 | https://github.com/cure53/DOMPurify |
 | `marked` | 18.0.5 | MIT | https://github.com/markedjs/marked |
