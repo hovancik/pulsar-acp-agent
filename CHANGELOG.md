@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The session history list now closes when you pick a session from it.
 - Cancelled permission prompts are now marked resolved and their action buttons are disabled.
 - Failed agent startup now fully resets transient session state before retrying.
 

@@ -593,24 +593,7 @@ export class PulsarAcpAgentView {
       atom.tooltips.add(this.sessionsToggle, { title: "Sessions" }),
     );
     this.sessionsToggle.addEventListener("click", () => {
-      this.sessionsListVisible = !this.sessionsListVisible;
-      if (this.sessionsListVisible) {
-        this.sessionsList.style.display = "";
-        const delta = this.sessionsList.offsetHeight; // force reflow
-        this.conversation.scrollTop += delta;
-        const active = this.sessionsList.querySelector<HTMLElement>(".pulsar-acp-agent-session-row.is-active");
-        active?.scrollIntoView({ block: "nearest" });
-      } else {
-        const delta = this.sessionsList.offsetHeight;
-        const savedScrollTop = this.conversation.scrollTop;
-        this.sessionsList.style.display = "none";
-        void this.conversation.offsetHeight; // force reflow
-        this.conversation.scrollTop = Math.max(0, savedScrollTop - delta);
-      }
-      this.sessionsToggle.setAttribute(
-        "aria-expanded",
-        String(this.sessionsListVisible),
-      );
+      this.setSessionsListVisible(!this.sessionsListVisible);
     });
 
     this.newSessionButton = document.createElement("button");
@@ -1641,6 +1624,28 @@ export class PulsarAcpAgentView {
       this.updateInputControls();
       this.updateSessionControls();
     });
+  }
+
+  private setSessionsListVisible(visible: boolean): void {
+    if (this.sessionsListVisible === visible) return;
+    this.sessionsListVisible = visible;
+    if (visible) {
+      this.sessionsList.style.display = "";
+      const delta = this.sessionsList.offsetHeight; // force reflow
+      this.conversation.scrollTop += delta;
+      const active = this.sessionsList.querySelector<HTMLElement>(".pulsar-acp-agent-session-row.is-active");
+      active?.scrollIntoView({ block: "nearest" });
+    } else {
+      const delta = this.sessionsList.offsetHeight;
+      const savedScrollTop = this.conversation.scrollTop;
+      this.sessionsList.style.display = "none";
+      void this.conversation.offsetHeight; // force reflow
+      this.conversation.scrollTop = Math.max(0, savedScrollTop - delta);
+    }
+    this.sessionsToggle.setAttribute(
+      "aria-expanded",
+      String(this.sessionsListVisible),
+    );
   }
 
   private switchToSession(id: string): void {
@@ -3255,8 +3260,10 @@ export class PulsarAcpAgentView {
       entry.appendChild(titleEl);
       entry.appendChild(timeEl);
       entry.addEventListener("click", () => {
-        if (info.sessionId !== this.session.sessionId)
+        if (info.sessionId !== this.session.sessionId) {
+          this.setSessionsListVisible(false);
           this.switchToSession(info.sessionId);
+        }
       });
 
       const canDelete = this.session.canDeleteSession();
