@@ -1,7 +1,7 @@
 {
   "name": "pulsar-acp-agent",
   "main": "./lib/main.js",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Bring your own AI coding agent to Pulsar via the Agent Client Protocol (ACP).",
   "keywords": [
     "acp",
