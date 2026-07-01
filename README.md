@@ -135,6 +135,14 @@ agent, or reasoning effort), the footer shows a dropdown for each. Selecting a
 value applies it to the active session; the agent stays authoritative, so the
 dropdowns reflect whatever it reports back. Options are per-session.
 
+When the agent advertises slash commands, typing `/` at the start of the
+composer opens a completion popup of its commands, each with a description.
+Filter by typing, navigate with the arrow keys, and select with Enter, Tab, or
+a click. Commands that take no argument are sent immediately; commands that take
+an argument insert `/name ` and show the agent's hint so you can finish the line
+and press Enter. Commands are per-session and update live as the agent reports
+them.
+
 ![Permission prompts for agent file edits](docs/images/permission-prompts.png)
 
 Tool calls, diffs and terminal output are rendered inline in the conversation,

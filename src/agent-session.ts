@@ -121,6 +121,7 @@ export class AgentSession {
   private loadedSessionIds = new Set<string>();
   private hostContextSentSessionIds = new Set<string>();
   private sessionConfigOptions = new Map<string, acp.SessionConfigOption[]>();
+  private sessionCommands = new Map<string, acp.AvailableCommand[]>();
 
   onEvent(callback: Listener): { dispose: () => void } {
     this.listeners.add(callback);
@@ -191,6 +192,7 @@ export class AgentSession {
       this.cleanupTerminals();
       this.loadedSessionIds.clear();
       this.sessionConfigOptions.clear();
+      this.sessionCommands.clear();
     }
 
     const target = this.launchTarget;
@@ -264,6 +266,7 @@ export class AgentSession {
       this.cleanupTerminals();
       this.loadedSessionIds.clear();
       this.sessionConfigOptions.clear();
+      this.sessionCommands.clear();
       this.emit({ type: "exit", code, signal });
     });
 
@@ -376,6 +379,7 @@ export class AgentSession {
     this.cleanupTerminals();
     this.loadedSessionIds.clear();
     this.sessionConfigOptions.clear();
+    this.sessionCommands.clear();
   }
 
   private cwd(): string {
@@ -403,6 +407,11 @@ export class AgentSession {
   currentSessionConfigOptions(): acp.SessionConfigOption[] | null {
     if (!this.sessionId) return null;
     return this.sessionConfigOptions.get(this.sessionId) ?? null;
+  }
+
+  currentAvailableCommands(): acp.AvailableCommand[] {
+    if (!this.sessionId) return [];
+    return this.sessionCommands.get(this.sessionId) ?? [];
   }
 
   async setConfigOption(configId: string, value: string): Promise<void> {
@@ -589,6 +598,9 @@ export class AgentSession {
         if (!update) return;
         if (update.sessionUpdate === "config_option_update") {
           this.sessionConfigOptions.set(params.sessionId, update.configOptions);
+        }
+        if (update.sessionUpdate === "available_commands_update") {
+          this.sessionCommands.set(params.sessionId, update.availableCommands);
         }
         this.emit({
           type: "update",
@@ -985,6 +997,7 @@ export class AgentSession {
       await this.connection.deleteSession({ sessionId: id });
       this.loadedSessionIds.delete(id);
       this.sessionConfigOptions.delete(id);
+      this.sessionCommands.delete(id);
       if (deletedActive) {
         this.sessionId = null;
         this.cleanupTerminals();
