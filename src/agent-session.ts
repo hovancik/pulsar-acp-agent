@@ -351,6 +351,7 @@ export class AgentSession {
     this.cancelPendingPermissions();
     this.cleanupTerminals();
     this.loadedSessionIds.clear();
+    this.hostContextSentSessionIds.clear();
     this.sessionConfigOptions.clear();
     this.sessionCommands.clear();
   }
