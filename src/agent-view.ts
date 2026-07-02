@@ -489,13 +489,7 @@ export class PulsarAcpAgentView {
     this.agentExited = true;
     this.currentTokens = null;
     this.renderLiveRow();
-    this.setLifecycleStatus("Startup failed.");
-    this.setAgentStatus("error");
-    this.openInfoPanel();
-    this.resetSessionsChrome();
-    this.stopButton.disabled = true;
-    this.updateInputControls();
-    this.endStreamingBlocks();
+    this.finishAgentTeardown("Startup failed.");
   }
 
   private buildUI(): void {
@@ -1776,6 +1770,18 @@ export class PulsarAcpAgentView {
     this.infoButton.setAttribute("aria-expanded", "false");
   }
 
+  private finishAgentTeardown(statusText: string): void {
+    this.setLifecycleStatus(statusText);
+    this.setAgentStatus("error");
+    // Auto-open details so Restart stays reachable even if the agent died
+    // before reporting any identity (e.g. a bad agent command).
+    this.openInfoPanel();
+    this.resetSessionsChrome();
+    this.stopButton.disabled = true;
+    this.updateInputControls();
+    this.endStreamingBlocks();
+  }
+
   private clearConversation(): void {
     this.conversation.innerHTML = "";
     this.resetConversationState();
@@ -2070,15 +2076,7 @@ export class PulsarAcpAgentView {
         this.currentTokens = null;
         this.renderLiveRow();
         this.renderConfigSelectors();
-        this.setLifecycleStatus(`Agent ${detail}.`);
-        this.setAgentStatus("error");
-        // Auto-open details so Restart stays reachable even if the agent died
-        // before reporting any identity (e.g. a bad agent command).
-        this.openInfoPanel();
-        this.resetSessionsChrome();
-        this.stopButton.disabled = true;
-        this.updateInputControls();
-        this.endStreamingBlocks();
+        this.finishAgentTeardown(`Agent ${detail}.`);
         break;
       }
     }
