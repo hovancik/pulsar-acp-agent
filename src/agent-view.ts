@@ -1108,6 +1108,23 @@ export class PulsarAcpAgentView {
     }
   }
 
+  private expandPanel(panel: HTMLElement): void {
+    panel.style.display = "";
+    // Reading offsetHeight forces a synchronous reflow so the scrollTop
+    // correction lands in the same frame — no visual jump.
+    const delta = panel.offsetHeight;
+    this.conversation.scrollTop += delta;
+  }
+
+  private collapsePanel(panel: HTMLElement): void {
+    // Capture both values before hiding so the browser can't clamp them first.
+    const delta = panel.offsetHeight;
+    const savedScrollTop = this.conversation.scrollTop;
+    panel.style.display = "none";
+    void this.conversation.offsetHeight; // force reflow
+    this.conversation.scrollTop = Math.max(0, savedScrollTop - delta);
+  }
+
   private openInfoPanel(): void {
     this.setInfoPanelOpen(true);
   }
@@ -1121,18 +1138,9 @@ export class PulsarAcpAgentView {
     this.infoPanelOpen = open;
     if (open) {
       this.renderInfoPanel();
-      this.infoPanel.style.display = "";
-      // Reading offsetHeight forces a synchronous reflow so scrollTop correction
-      // lands in the same frame — no visual jump.
-      const delta = this.infoPanel.offsetHeight;
-      this.conversation.scrollTop += delta;
+      this.expandPanel(this.infoPanel);
     } else {
-      // Capture both values before hiding so the browser can't clamp them first.
-      const delta = this.infoPanel.offsetHeight;
-      const savedScrollTop = this.conversation.scrollTop;
-      this.infoPanel.style.display = "none";
-      void this.conversation.offsetHeight; // force reflow
-      this.conversation.scrollTop = Math.max(0, savedScrollTop - delta);
+      this.collapsePanel(this.infoPanel);
     }
     this.infoButton.setAttribute("aria-expanded", String(this.infoPanelOpen));
   }
@@ -1841,17 +1849,11 @@ export class PulsarAcpAgentView {
     if (this.sessionsListVisible === visible) return;
     this.sessionsListVisible = visible;
     if (visible) {
-      this.sessionsList.style.display = "";
-      const delta = this.sessionsList.offsetHeight; // force reflow
-      this.conversation.scrollTop += delta;
+      this.expandPanel(this.sessionsList);
       const active = this.sessionsList.querySelector<HTMLElement>(".pulsar-acp-agent-session-row.is-active");
       active?.scrollIntoView({ block: "nearest" });
     } else {
-      const delta = this.sessionsList.offsetHeight;
-      const savedScrollTop = this.conversation.scrollTop;
-      this.sessionsList.style.display = "none";
-      void this.conversation.offsetHeight; // force reflow
-      this.conversation.scrollTop = Math.max(0, savedScrollTop - delta);
+      this.collapsePanel(this.sessionsList);
     }
     this.sessionsToggle.setAttribute(
       "aria-expanded",
