@@ -1822,23 +1822,10 @@ export class PulsarAcpAgentView {
     this.autoApprovePermissions = false;
     this.updateAutoApproveButton();
     this.setFollowAgent(false);
-    // Cache the outgoing conversation: the agent keeps it loaded, so returning
-    // to it must restore this DOM rather than re-load (which the agent rejects).
     const currentId = this.session.sessionId;
-    if (currentId) {
-      this.rememberPlanStateFor(currentId);
-      this.sessionConversationCache.set(currentId, this.conversation);
-      this.swapInFreshConversation();
-    }
+    if (currentId) this.stashConversation(currentId);
     this.session.newSession().catch((error) => {
-      // Roll back to the previous conversation if creating the session failed.
-      if (currentId) {
-        const prev = this.sessionConversationCache.get(currentId);
-        if (prev) {
-          this.swapInConversation(prev);
-          this.restorePlanStateFor(currentId);
-        }
-      }
+      if (currentId) this.rollbackConversation(currentId);
       this.appendError(error instanceof Error ? error.message : String(error));
       this.updateInputControls();
       this.updateSessionControls();
@@ -1872,12 +1859,7 @@ export class PulsarAcpAgentView {
     const currentId = this.session.sessionId;
     const info = this.knownSessions.find((s) => s.sessionId === id);
 
-    // Save current conversation DOM node (preserves canvas pixels etc.)
-    if (currentId) {
-      this.rememberPlanStateFor(currentId);
-      this.sessionConversationCache.set(currentId, this.conversation);
-      this.swapInFreshConversation();
-    }
+    if (currentId) this.stashConversation(currentId);
 
     // If the agent already has this session loaded, re-activate it instead of
     // calling session/load again (agents reject loading an already-loaded
@@ -1900,21 +1882,33 @@ export class PulsarAcpAgentView {
     this.showLoadingOverlay();
     this.updateSessionControls();
     this.session.loadSession(id, info?.cwd).catch((error) => {
-      // Roll back to the previous session's conversation on failure.
       this.hideLoadingOverlay();
-      if (currentId) {
-        const prev = this.sessionConversationCache.get(currentId);
-        if (prev) {
-          this.swapInConversation(prev);
-          this.restorePlanStateFor(currentId);
-        }
-      }
+      if (currentId) this.rollbackConversation(currentId);
       this.setLifecycleStatus("");
       this.setAgentStatus("ready");
       this.appendError(error instanceof Error ? error.message : String(error));
       this.updateInputControls();
       this.updateSessionControls();
     });
+  }
+
+  // Cache the outgoing conversation DOM before switching away. The agent keeps
+  // the session loaded, so returning to it must restore this exact node rather
+  // than re-load it (agents reject loading an already-loaded session); reusing
+  // the node also preserves canvas pixels and other live DOM state.
+  private stashConversation(id: string): void {
+    this.rememberPlanStateFor(id);
+    this.sessionConversationCache.set(id, this.conversation);
+    this.swapInFreshConversation();
+  }
+
+  // Restore a previously stashed conversation DOM after a failed new/load.
+  private rollbackConversation(id: string): void {
+    const prev = this.sessionConversationCache.get(id);
+    if (prev) {
+      this.swapInConversation(prev);
+      this.restorePlanStateFor(id);
+    }
   }
 
   private swapInFreshConversation(): void {
