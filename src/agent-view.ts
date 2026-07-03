@@ -489,13 +489,7 @@ export class PulsarAcpAgentView {
     this.agentExited = true;
     this.currentTokens = null;
     this.renderLiveRow();
-    this.setLifecycleStatus("Startup failed.");
-    this.setAgentStatus("error");
-    this.openInfoPanel();
-    this.resetSessionsChrome();
-    this.stopButton.disabled = true;
-    this.updateInputControls();
-    this.endStreamingBlocks();
+    this.finishAgentTeardown("Startup failed.");
   }
 
   private buildUI(): void {
@@ -1114,6 +1108,23 @@ export class PulsarAcpAgentView {
     }
   }
 
+  private expandPanel(panel: HTMLElement): void {
+    panel.style.display = "";
+    // Reading offsetHeight forces a synchronous reflow so the scrollTop
+    // correction lands in the same frame — no visual jump.
+    const delta = panel.offsetHeight;
+    this.conversation.scrollTop += delta;
+  }
+
+  private collapsePanel(panel: HTMLElement): void {
+    // Capture both values before hiding so the browser can't clamp them first.
+    const delta = panel.offsetHeight;
+    const savedScrollTop = this.conversation.scrollTop;
+    panel.style.display = "none";
+    void this.conversation.offsetHeight; // force reflow
+    this.conversation.scrollTop = Math.max(0, savedScrollTop - delta);
+  }
+
   private openInfoPanel(): void {
     this.setInfoPanelOpen(true);
   }
@@ -1127,18 +1138,9 @@ export class PulsarAcpAgentView {
     this.infoPanelOpen = open;
     if (open) {
       this.renderInfoPanel();
-      this.infoPanel.style.display = "";
-      // Reading offsetHeight forces a synchronous reflow so scrollTop correction
-      // lands in the same frame — no visual jump.
-      const delta = this.infoPanel.offsetHeight;
-      this.conversation.scrollTop += delta;
+      this.expandPanel(this.infoPanel);
     } else {
-      // Capture both values before hiding so the browser can't clamp them first.
-      const delta = this.infoPanel.offsetHeight;
-      const savedScrollTop = this.conversation.scrollTop;
-      this.infoPanel.style.display = "none";
-      void this.conversation.offsetHeight; // force reflow
-      this.conversation.scrollTop = Math.max(0, savedScrollTop - delta);
+      this.collapsePanel(this.infoPanel);
     }
     this.infoButton.setAttribute("aria-expanded", String(this.infoPanelOpen));
   }
@@ -1776,6 +1778,18 @@ export class PulsarAcpAgentView {
     this.infoButton.setAttribute("aria-expanded", "false");
   }
 
+  private finishAgentTeardown(statusText: string): void {
+    this.setLifecycleStatus(statusText);
+    this.setAgentStatus("error");
+    // Auto-open details so Restart stays reachable even if the agent died
+    // before reporting any identity (e.g. a bad agent command).
+    this.openInfoPanel();
+    this.resetSessionsChrome();
+    this.stopButton.disabled = true;
+    this.updateInputControls();
+    this.endStreamingBlocks();
+  }
+
   private clearConversation(): void {
     this.conversation.innerHTML = "";
     this.resetConversationState();
@@ -1808,23 +1822,10 @@ export class PulsarAcpAgentView {
     this.autoApprovePermissions = false;
     this.updateAutoApproveButton();
     this.setFollowAgent(false);
-    // Cache the outgoing conversation: the agent keeps it loaded, so returning
-    // to it must restore this DOM rather than re-load (which the agent rejects).
     const currentId = this.session.sessionId;
-    if (currentId) {
-      this.rememberPlanStateFor(currentId);
-      this.sessionConversationCache.set(currentId, this.conversation);
-      this.swapInFreshConversation();
-    }
+    if (currentId) this.stashConversation(currentId);
     this.session.newSession().catch((error) => {
-      // Roll back to the previous conversation if creating the session failed.
-      if (currentId) {
-        const prev = this.sessionConversationCache.get(currentId);
-        if (prev) {
-          this.swapInConversation(prev);
-          this.restorePlanStateFor(currentId);
-        }
-      }
+      if (currentId) this.rollbackConversation(currentId);
       this.appendError(error instanceof Error ? error.message : String(error));
       this.updateInputControls();
       this.updateSessionControls();
@@ -1835,17 +1836,11 @@ export class PulsarAcpAgentView {
     if (this.sessionsListVisible === visible) return;
     this.sessionsListVisible = visible;
     if (visible) {
-      this.sessionsList.style.display = "";
-      const delta = this.sessionsList.offsetHeight; // force reflow
-      this.conversation.scrollTop += delta;
+      this.expandPanel(this.sessionsList);
       const active = this.sessionsList.querySelector<HTMLElement>(".pulsar-acp-agent-session-row.is-active");
       active?.scrollIntoView({ block: "nearest" });
     } else {
-      const delta = this.sessionsList.offsetHeight;
-      const savedScrollTop = this.conversation.scrollTop;
-      this.sessionsList.style.display = "none";
-      void this.conversation.offsetHeight; // force reflow
-      this.conversation.scrollTop = Math.max(0, savedScrollTop - delta);
+      this.collapsePanel(this.sessionsList);
     }
     this.sessionsToggle.setAttribute(
       "aria-expanded",
@@ -1864,12 +1859,7 @@ export class PulsarAcpAgentView {
     const currentId = this.session.sessionId;
     const info = this.knownSessions.find((s) => s.sessionId === id);
 
-    // Save current conversation DOM node (preserves canvas pixels etc.)
-    if (currentId) {
-      this.rememberPlanStateFor(currentId);
-      this.sessionConversationCache.set(currentId, this.conversation);
-      this.swapInFreshConversation();
-    }
+    if (currentId) this.stashConversation(currentId);
 
     // If the agent already has this session loaded, re-activate it instead of
     // calling session/load again (agents reject loading an already-loaded
@@ -1892,21 +1882,33 @@ export class PulsarAcpAgentView {
     this.showLoadingOverlay();
     this.updateSessionControls();
     this.session.loadSession(id, info?.cwd).catch((error) => {
-      // Roll back to the previous session's conversation on failure.
       this.hideLoadingOverlay();
-      if (currentId) {
-        const prev = this.sessionConversationCache.get(currentId);
-        if (prev) {
-          this.swapInConversation(prev);
-          this.restorePlanStateFor(currentId);
-        }
-      }
+      if (currentId) this.rollbackConversation(currentId);
       this.setLifecycleStatus("");
       this.setAgentStatus("ready");
       this.appendError(error instanceof Error ? error.message : String(error));
       this.updateInputControls();
       this.updateSessionControls();
     });
+  }
+
+  // Cache the outgoing conversation DOM before switching away. The agent keeps
+  // the session loaded, so returning to it must restore this exact node rather
+  // than re-load it (agents reject loading an already-loaded session); reusing
+  // the node also preserves canvas pixels and other live DOM state.
+  private stashConversation(id: string): void {
+    this.rememberPlanStateFor(id);
+    this.sessionConversationCache.set(id, this.conversation);
+    this.swapInFreshConversation();
+  }
+
+  // Restore a previously stashed conversation DOM after a failed new/load.
+  private rollbackConversation(id: string): void {
+    const prev = this.sessionConversationCache.get(id);
+    if (prev) {
+      this.swapInConversation(prev);
+      this.restorePlanStateFor(id);
+    }
   }
 
   private swapInFreshConversation(): void {
@@ -2070,15 +2072,7 @@ export class PulsarAcpAgentView {
         this.currentTokens = null;
         this.renderLiveRow();
         this.renderConfigSelectors();
-        this.setLifecycleStatus(`Agent ${detail}.`);
-        this.setAgentStatus("error");
-        // Auto-open details so Restart stays reachable even if the agent died
-        // before reporting any identity (e.g. a bad agent command).
-        this.openInfoPanel();
-        this.resetSessionsChrome();
-        this.stopButton.disabled = true;
-        this.updateInputControls();
-        this.endStreamingBlocks();
+        this.finishAgentTeardown(`Agent ${detail}.`);
         break;
       }
     }
