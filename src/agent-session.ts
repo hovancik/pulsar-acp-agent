@@ -50,7 +50,6 @@ export type AgentEvent =
       type: "initialized";
       info: acp.Implementation | null;
       capabilities: acp.AgentCapabilities | null;
-      authMethods: acp.AuthMethod[];
       supportsImages: boolean;
     }
   | { type: "ready"; source: "start" | "new" | "load" }
@@ -290,7 +289,6 @@ export class AgentSession {
       type: "initialized",
       info: init.agentInfo ?? null,
       capabilities: this.agentCapabilities,
-      authMethods: this.authMethods,
       supportsImages: this.promptCapabilities?.image === true,
     });
 
