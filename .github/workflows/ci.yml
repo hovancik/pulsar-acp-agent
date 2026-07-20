@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           # Match Pulsar's runtime: Electron 30.5.1 bundles Node 20.16.0.
           node-version-file: .nvmrc
