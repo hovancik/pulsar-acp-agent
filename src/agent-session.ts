@@ -18,8 +18,6 @@ declare const __PULSAR_ACP_AGENT_VERSION__: string;
 
 const PROTOCOL_VERSION = acp.PROTOCOL_VERSION;
 const STARTUP_TIMEOUT_MS = 30_000;
-// JSON-RPC code the agent returns from `session/new` when authentication is
-// required (ACP's `RequestError.authRequired()`; reserved range -32000..-32099).
 const AUTH_REQUIRED_CODE = -32000;
 const DEFAULT_OUTPUT_BYTE_LIMIT = 64 * 1024;
 const MAX_OUTPUT_BYTE_LIMIT = 1024 * 1024;
@@ -85,10 +83,6 @@ export type AgentEvent =
 
 type Listener = (event: AgentEvent) => void;
 
-// Thrown by `_start()` when an in-flight startup — currently only the wait for
-// the user's auth-method choice — is abandoned by a lifecycle teardown (exit,
-// switch, restart, dispose). The view swallows it via `isStartupCancellation`
-// so teardown doesn't surface a spurious error on top of the real status.
 export class StartupCancelled extends Error {
   constructor() {
     super("Startup cancelled.");
@@ -100,9 +94,6 @@ export function isStartupCancellation(error: unknown): boolean {
   return error instanceof StartupCancelled;
 }
 
-// The outcome of awaiting the user's auth-method choice. `lifecycle` is the
-// silent teardown path (becomes `StartupCancelled`); `cancel` is an explicit
-// user dismissal (a plain, displayed error).
 type AuthChoice =
   | { type: "method"; methodId: acp.AuthMethodId }
   | { type: "cancel" }
@@ -116,10 +107,6 @@ export interface LaunchTarget {
   command: string;
 }
 
-// Builds a terminal sign-in command from an auth method's agent-controlled
-// `_meta["terminal-auth"]`. `_meta` is untyped `unknown` per ACP, so validate
-// shape before interpolating into a hint shown to the user: require a string
-// `command` and keep only string `args`.
 function terminalAuthCommand(raw: unknown): string | null {
   if (!raw || typeof raw !== "object") return null;
   const meta = raw as { command?: unknown; args?: unknown };
@@ -130,7 +117,6 @@ function terminalAuthCommand(raw: unknown): string | null {
   return [meta.command, ...args].join(" ");
 }
 
-// Builds an SDK error so the ACP transport preserves the JSON-RPC code.
 function rpcError(message: string, code: number): Error {
   return new acp.RequestError(code, message);
 }
@@ -339,10 +325,6 @@ export class AgentSession {
       supportsImages: this.promptCapabilities?.image === true,
     });
 
-    // Reactive auth: try to open a session first, and only authenticate if the
-    // agent reports it's required (-32000). This avoids re-prompting an
-    // already-signed-in user of a multi-method agent. See docs/acp-conformance
-    // -review.md and the ACP session/new flow.
     let session: acp.NewSessionResponse;
     try {
       session = await this.newSessionWithTimeout(connection, cwd, processError);
@@ -622,11 +604,6 @@ export class AgentSession {
     this.emit({ type: "permissions-cancelled" });
   }
 
-  // Settles a pending auth-method wait for a lifecycle teardown (exit, switch,
-  // restart, dispose). Resolves rather than rejects — an orphaned rejection
-  // would surface as an unhandled promise rejection — and clears the resolver
-  // first so it fires at most once. `_start` turns the `lifecycle` choice into
-  // `StartupCancelled`, which the view swallows.
   private cancelPendingAuth(): void {
     const resolve = this.authChoiceResolve;
     if (!resolve) return;
@@ -634,11 +611,6 @@ export class AgentSession {
     resolve({ type: "lifecycle" });
   }
 
-  // Chooses the auth method to use after `session/new` reports auth is required.
-  // A single agent-type method authenticates silently; two or more prompt the
-  // user via the `auth-required` event; none yields a clear unsupported error.
-  // The user wait is unbounded (real think-time) but raced against a process
-  // error so a crash during the prompt surfaces its real message.
   private async resolveAuthMethod(
     processError: Promise<never>,
   ): Promise<acp.AuthMethodAgent> {

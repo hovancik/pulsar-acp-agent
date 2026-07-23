@@ -115,6 +115,9 @@ When reviewing changes, explicitly check:
   `node --test test/util.test.mjs` (add `--test-name-pattern="..."` to narrow).
 - `npm run smoke -- <command...>` does a live ACP handshake against a real agent
   (`scripts/smoke.mjs`); defaults to `copilot --acp --stdio`.
+- `scripts/mock-agent.mjs` forces the reactive-auth picker with two methods.
+  Validate it with `npm run smoke -- node scripts/mock-agent.mjs`; set
+  `MOCK_AUTH_METHODS=1` for one method or `MOCK_NO_AUTH=1` to skip auth.
 - The committed bundle `lib/main.js` must match the build (CI enforces this).
 - When feasible, manually verify UI changes by reloading Pulsar
   (`Window: Reload`) and opening the ACP panel.
