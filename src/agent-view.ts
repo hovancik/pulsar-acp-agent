@@ -325,10 +325,6 @@ export class PulsarAcpAgentView {
   private currentTokens: string | null = null;
   private lifecycleStatus = "";
   private agentExited = false;
-  // Set while a reactive-auth method picker is awaiting the user's choice (and
-  // through the ensuing authenticate + session/new). Gates the composer and
-  // session controls. `authCard` is the picker DOM; the session settles its own
-  // resolver on teardown (cancelPendingAuth), so the view only removes the card.
   private awaitingAuth = false;
   private authCard: HTMLElement | null = null;
   private input!: HTMLTextAreaElement;
@@ -459,8 +455,6 @@ export class PulsarAcpAgentView {
     const currentSession = this.session;
     this.session.start(target).catch((error) => {
       if (this.session !== currentSession) return;
-      // A silent lifecycle cancellation (the auth picker abandoned by teardown)
-      // leaves its status to the teardown path; any other error is surfaced.
       if (isStartupCancellation(error)) return;
       this.handleStartupError(error);
     });
@@ -1501,8 +1495,6 @@ export class PulsarAcpAgentView {
       context = await this.materializePendingContext();
       if (this.session !== currentSession || !this.preparingPrompt) return;
     } catch (error) {
-      // Silent lifecycle cancellation (auth picker abandoned by teardown): the
-      // teardown path owns the status and clears awaiting-auth, so swallow it.
       if (isStartupCancellation(error)) return;
       if (this.session === currentSession) {
         this.endAwaitingAuth();
@@ -3438,9 +3430,6 @@ export class PulsarAcpAgentView {
     this.scrollToBottom();
   }
 
-  // Reactive-auth method picker (shown when session/new reports auth is required
-  // and the agent offers two or more sign-in methods). Gates the composer via
-  // awaitingAuth until the auth flow reaches a terminal state (ready/error).
   private renderAuthPicker(
     methods: acp.AuthMethodAgent[],
     respond: (methodId: acp.AuthMethodId | null) => void,
@@ -3466,8 +3455,6 @@ export class PulsarAcpAgentView {
     const options = document.createElement("div");
     options.classList.add("pulsar-acp-agent-auth-options");
 
-    // Removing the card decouples DOM from the session's resolver: the button
-    // settles the session (respond); teardown settles it via cancelPendingAuth.
     const choose = (methodId: acp.AuthMethodId | null): void => {
       respond(methodId);
       this.removeAuthCard();
@@ -3496,8 +3483,6 @@ export class PulsarAcpAgentView {
     options.querySelector<HTMLButtonElement>("button")?.focus();
   }
 
-  // Removes the picker card without touching the awaiting-auth gate: a method
-  // selection continues the auth flow (composer stays gated until ready/error).
   private removeAuthCard(): void {
     this.authTooltips.dispose();
     this.authTooltips = new CompositeDisposable();
@@ -3507,8 +3492,6 @@ export class PulsarAcpAgentView {
     }
   }
 
-  // Clears the awaiting-auth gate at a terminal state (ready/error/teardown) and
-  // refreshes controls; also removes the card if one is still shown.
   private endAwaitingAuth(): void {
     this.removeAuthCard();
     if (!this.awaitingAuth) return;

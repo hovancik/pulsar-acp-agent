@@ -109,14 +109,6 @@ export function configOptionLabel(option: acp.SessionConfigSelect): string {
   return match?.name || option.currentValue;
 }
 
-// Classifies the auth methods an agent advertises into the action the client
-// should take when `session/new` reports authentication is required. Only
-// `agent`-type methods are actionable: the client calls `authenticate` and the
-// agent drives its own flow. The experimental `env_var` and `terminal` variants
-// carry a `type` discriminator (per the ACP schema, an absent `type` means
-// `agent`) and need client-side handling this package does not advertise, so
-// they are ignored. `none` means the agent requires auth but offers nothing
-// this client can drive; `auto` authenticates silently; `pick` prompts the user.
 export type AuthMethodClassification =
   | { kind: "none" }
   | { kind: "auto"; method: acp.AuthMethodAgent }
@@ -125,6 +117,7 @@ export type AuthMethodClassification =
 export function classifyAuthMethods(
   methods: acp.AuthMethod[],
 ): AuthMethodClassification {
+  // Agent-driven ACP methods omit type; typed methods are client-driven.
   const agentMethods = methods.filter(
     (method): method is acp.AuthMethodAgent => !("type" in method),
   );
