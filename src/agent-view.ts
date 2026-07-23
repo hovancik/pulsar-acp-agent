@@ -4,7 +4,12 @@ import * as path from "path";
 import * as acp from "@agentclientprotocol/sdk";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { AgentEvent, AgentSession, LaunchTarget } from "./agent-session";
+import {
+  AgentEvent,
+  AgentSession,
+  LaunchTarget,
+  isStartupCancellation,
+} from "./agent-session";
 import {
   AgentsConfig,
   isLaunchedAgentStale,
@@ -131,8 +136,6 @@ type MaterializedContext = {
   kind: ContextKind;
   label: string;
 };
-
-const STDERR_LIMIT = 4000;
 
 // Reject images above Zed's 5 MiB per-image cap; we don't downscale.
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -294,7 +297,6 @@ export class PulsarAcpAgentView {
   private activePlanEntries: acp.PlanEntry[] = [];
   private activePlanSessionId: string | null = null;
   private planExpanded = false;
-  private stderrBody: HTMLElement | null = null;
   private streamRole: string | null = null;
   private streamMessageId: string | null = null;
   private streamBody: HTMLElement | null = null;
@@ -323,6 +325,12 @@ export class PulsarAcpAgentView {
   private currentTokens: string | null = null;
   private lifecycleStatus = "";
   private agentExited = false;
+  // Set while a reactive-auth method picker is awaiting the user's choice (and
+  // through the ensuing authenticate + session/new). Gates the composer and
+  // session controls. `authCard` is the picker DOM; the session settles its own
+  // resolver on teardown (cancelPendingAuth), so the view only removes the card.
+  private awaitingAuth = false;
+  private authCard: HTMLElement | null = null;
   private input!: HTMLTextAreaElement;
   private slashMenu!: HTMLElement;
   private slashHint!: HTMLElement;
@@ -357,6 +365,7 @@ export class PulsarAcpAgentView {
   private sessionsList!: HTMLElement;
   private sessionTooltips = new CompositeDisposable();
   private conversationTooltips = new CompositeDisposable();
+  private authTooltips = new CompositeDisposable();
   private thumbnailTooltips = new CompositeDisposable();
   private sessionsListVisible = false;
   private knownSessions: acp.SessionInfo[] = [];
@@ -450,6 +459,9 @@ export class PulsarAcpAgentView {
     const currentSession = this.session;
     this.session.start(target).catch((error) => {
       if (this.session !== currentSession) return;
+      // A silent lifecycle cancellation (the auth picker abandoned by teardown)
+      // leaves its status to the teardown path; any other error is surfaced.
+      if (isStartupCancellation(error)) return;
       this.handleStartupError(error);
     });
   }
@@ -1293,6 +1305,7 @@ export class PulsarAcpAgentView {
       this.session.running ||
       this.session.switching ||
       this.preparingPrompt ||
+      this.awaitingAuth ||
       this.pendingImageLoads > 0
     );
   }
@@ -1488,7 +1501,11 @@ export class PulsarAcpAgentView {
       context = await this.materializePendingContext();
       if (this.session !== currentSession || !this.preparingPrompt) return;
     } catch (error) {
+      // Silent lifecycle cancellation (auth picker abandoned by teardown): the
+      // teardown path owns the status and clears awaiting-auth, so swallow it.
+      if (isStartupCancellation(error)) return;
       if (this.session === currentSession) {
+        this.endAwaitingAuth();
         this.appendError(
           error instanceof Error ? error.message : String(error),
         );
@@ -1779,6 +1796,7 @@ export class PulsarAcpAgentView {
   }
 
   private finishAgentTeardown(statusText: string): void {
+    this.endAwaitingAuth();
     this.setLifecycleStatus(statusText);
     this.setAgentStatus("error");
     // Auto-open details so Restart stays reachable even if the agent died
@@ -1796,6 +1814,7 @@ export class PulsarAcpAgentView {
   }
 
   private resetConversationState(): void {
+    this.endAwaitingAuth();
     this.toolViews.clear();
     this.conversationTooltips.dispose();
     this.conversationTooltips = new CompositeDisposable();
@@ -1803,7 +1822,6 @@ export class PulsarAcpAgentView {
     this.activePlanEntries = [];
     this.activePlanSessionId = null;
     this.renderPlanBar();
-    this.stderrBody = null;
     this.pendingImages = [];
     this.pendingImageLoads = 0;
     this.imageLoadGeneration++;
@@ -1987,6 +2005,7 @@ export class PulsarAcpAgentView {
         break;
       case "ready":
         this.lifecycleStatus = "";
+        this.endAwaitingAuth();
         this.hideLoadingOverlay();
         this.renderPill();
         this.setAgentStatus("ready");
@@ -2019,7 +2038,6 @@ export class PulsarAcpAgentView {
         this.setGeneratingState("working");
         this.updateInputControls();
         this.updateSessionControls();
-        this.stderrBody = null;
         break;
       case "turn-end":
         this.setAgentStatus("ready");
@@ -2040,6 +2058,9 @@ export class PulsarAcpAgentView {
       case "permission":
         this.renderPermission(event.params, event.respond);
         break;
+      case "auth-required":
+        this.renderAuthPicker(event.methods, event.respond);
+        break;
       case "permissions-cancelled":
         this.markPendingPermissionsCancelled();
         break;
@@ -2051,7 +2072,6 @@ export class PulsarAcpAgentView {
         break;
       case "stderr":
         console.warn("[pulsar-acp-agent]", event.text);
-        this.appendStderr(event.text);
         break;
       case "error":
         this.hideLoadingOverlay();
@@ -2074,6 +2094,10 @@ export class PulsarAcpAgentView {
         this.renderConfigSelectors();
         this.finishAgentTeardown(`Agent ${detail}.`);
         break;
+      }
+      default: {
+        const _exhaustive: never = event;
+        return _exhaustive;
       }
     }
   }
@@ -2808,7 +2832,8 @@ export class PulsarAcpAgentView {
     const busy =
       this.session.running ||
       this.session.switching ||
-      this.preparingPrompt;
+      this.preparingPrompt ||
+      this.awaitingAuth;
     this.sendButton.disabled = busy || this.pendingImageLoads > 0;
     this.contextTrigger.disabled = busy;
     this.updateConfigSelectorsDisabled();
@@ -2827,18 +2852,6 @@ export class PulsarAcpAgentView {
     );
     message.textContent = text;
     this.conversation.appendChild(message);
-    this.scrollToBottom();
-  }
-
-  private appendStderr(text: string): void {
-    if (!this.stderrBody) {
-      this.stderrBody = this.appendMessage("note", "Agent stderr:\n");
-    }
-    const nextText = `${this.stderrBody.textContent}${text}`;
-    this.stderrBody.textContent =
-      nextText.length > STDERR_LIMIT
-        ? `Agent stderr:\n…${nextText.slice(-STDERR_LIMIT)}`
-        : nextText;
     this.scrollToBottom();
   }
 
@@ -3425,6 +3438,85 @@ export class PulsarAcpAgentView {
     this.scrollToBottom();
   }
 
+  // Reactive-auth method picker (shown when session/new reports auth is required
+  // and the agent offers two or more sign-in methods). Gates the composer via
+  // awaitingAuth until the auth flow reaches a terminal state (ready/error).
+  private renderAuthPicker(
+    methods: acp.AuthMethodAgent[],
+    respond: (methodId: acp.AuthMethodId | null) => void,
+  ): void {
+    this.removeAuthCard();
+    this.awaitingAuth = true;
+    this.setLifecycleStatus(
+      "Authentication required \u2014 choose how to sign in.",
+    );
+    this.setAgentStatus("connecting");
+
+    const block = document.createElement("div");
+    block.classList.add("pulsar-acp-agent-auth");
+
+    const question = document.createElement("div");
+    question.classList.add("pulsar-acp-agent-auth-question");
+    const icon = document.createElement("span");
+    icon.classList.add("icon", "icon-key");
+    question.appendChild(icon);
+    question.appendChild(document.createTextNode(" Choose how to sign in:"));
+    block.appendChild(question);
+
+    const options = document.createElement("div");
+    options.classList.add("pulsar-acp-agent-auth-options");
+
+    // Removing the card decouples DOM from the session's resolver: the button
+    // settles the session (respond); teardown settles it via cancelPendingAuth.
+    const choose = (methodId: acp.AuthMethodId | null): void => {
+      respond(methodId);
+      this.removeAuthCard();
+    };
+
+    for (const method of methods) {
+      const button = this.makeButton(method.name, () => choose(method.id));
+      if (method.description) {
+        this.authTooltips.add(
+          atom.tooltips.add(button, { title: method.description, html: false }),
+        );
+      }
+      options.appendChild(button);
+    }
+
+    const cancel = this.makeButton("Cancel", () => choose(null));
+    cancel.classList.add("pulsar-acp-agent-reject");
+    options.appendChild(cancel);
+
+    block.appendChild(options);
+    this.conversation.appendChild(block);
+    this.authCard = block;
+    this.updateInputControls();
+    this.updateSessionControls();
+    this.scrollToBottom();
+    options.querySelector<HTMLButtonElement>("button")?.focus();
+  }
+
+  // Removes the picker card without touching the awaiting-auth gate: a method
+  // selection continues the auth flow (composer stays gated until ready/error).
+  private removeAuthCard(): void {
+    this.authTooltips.dispose();
+    this.authTooltips = new CompositeDisposable();
+    if (this.authCard) {
+      this.authCard.remove();
+      this.authCard = null;
+    }
+  }
+
+  // Clears the awaiting-auth gate at a terminal state (ready/error/teardown) and
+  // refreshes controls; also removes the card if one is still shown.
+  private endAwaitingAuth(): void {
+    this.removeAuthCard();
+    if (!this.awaitingAuth) return;
+    this.awaitingAuth = false;
+    this.updateInputControls();
+    this.updateSessionControls();
+  }
+
   private renderSessionsList(sessions: acp.SessionInfo[]): void {
     this.knownSessions = sessions;
     this.sessionTooltips.dispose();
@@ -3553,7 +3645,8 @@ export class PulsarAcpAgentView {
   }
 
   private updateSessionControls(): void {
-    const busy = this.session.running || this.session.switching;
+    const busy =
+      this.session.running || this.session.switching || this.awaitingAuth;
     const canDelete = this.session.canDeleteSession();
     this.newSessionButton.disabled = busy;
     for (const row of Array.from(
@@ -3599,11 +3692,17 @@ export class PulsarAcpAgentView {
 
   private renderLiveRow(): void {
     let text = this.currentTokens ?? "";
+    let isLifecycle = false;
     if (!text && (!this.storedAgentInfo || this.agentExited)) {
       text = this.lifecycleStatus || (this.agentExited ? "Agent exited" : "Starting\u2026");
+      isLifecycle = true;
     }
     this.liveStatusEl.textContent = text;
     this.liveStatusEl.style.display = text ? "" : "none";
+    this.liveStatusEl.classList.toggle(
+      "pulsar-acp-agent-token-usage--lifecycle",
+      isLifecycle,
+    );
     const hasDetails = this.infoButton.style.display !== "none";
     this.runtimeStatusEl.style.display = hasDetails || text ? "" : "none";
   }
@@ -3717,6 +3816,7 @@ export class PulsarAcpAgentView {
     this.reporter?.clear(this);
     this.sessionTooltips.dispose();
     this.conversationTooltips.dispose();
+    this.authTooltips.dispose();
     this.thumbnailTooltips.dispose();
     this.contextTooltips.dispose();
     for (const selector of this.configSelectors) selector.dispose();

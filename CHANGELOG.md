@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Authentication is now reactive: you're prompted to sign in only when the agent requires it, with a picker when it offers more than one method.
+- Agent `stderr` now goes only to the developer console, not the conversation.
+
 ### Fixed
 
 - The host context is now re-sent when a session is resumed after the agent process restarts.

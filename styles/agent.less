@@ -255,6 +255,13 @@
   white-space: nowrap;
 }
 
+// Lifecycle placeholders (e.g. "Starting…", "Agent exited") sit on the left,
+// unlike the right-aligned token count.
+.pulsar-acp-agent-token-usage--lifecycle {
+  margin-left: 0;
+  margin-right: auto;
+}
+
 .pulsar-acp-agent-info-panel {
   border-bottom: 1px solid @pane-item-border-color;
   padding: (@component-padding * 0.75) @component-padding;
@@ -814,6 +821,28 @@
 
     .pulsar-acp-agent-allow-always {
       font-weight: bold;
+    }
+  }
+}
+
+.pulsar-acp-agent-auth {
+  border: 1px solid @background-color-info;
+  border-radius: @component-border-radius;
+  padding: (@component-padding / 2);
+  margin-bottom: @component-padding;
+
+  .pulsar-acp-agent-auth-question {
+    font-weight: bold;
+    margin-bottom: 6px;
+  }
+
+  .pulsar-acp-agent-auth-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+
+    .pulsar-acp-agent-reject {
+      opacity: 0.8;
     }
   }
 }

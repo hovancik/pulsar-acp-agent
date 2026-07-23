@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 // per .nvmrc), which can't execute TypeScript. `npm run build` emits lib/util.js.
 import {
   buildContextBlock,
+  classifyAuthMethods,
   completedPlanEntries,
   configOptionLabel,
   fileUri,
@@ -334,4 +335,53 @@ test("buildContextBlock: builds an embedded text resource without mimeType", () 
     type: "resource",
     resource: { uri: "file:///x#L1", text: "hello" },
   });
+});
+
+// ---------------------------------------------------------------------------
+// classifyAuthMethods
+// ---------------------------------------------------------------------------
+
+const agentMethod = (id, name = id) => ({ id, name });
+const experimentalMethod = (id, type) => ({ id, name: id, type });
+
+test("classifyAuthMethods: no methods yields none", () => {
+  assert.deepEqual(classifyAuthMethods([]), { kind: "none" });
+});
+
+test("classifyAuthMethods: only experimental methods yields none", () => {
+  const methods = [
+    experimentalMethod("env", "env_var"),
+    experimentalMethod("term", "terminal"),
+  ];
+  assert.deepEqual(classifyAuthMethods(methods), { kind: "none" });
+});
+
+test("classifyAuthMethods: single agent method authenticates automatically", () => {
+  const method = agentMethod("oauth", "Sign in with OAuth");
+  assert.deepEqual(classifyAuthMethods([method]), { kind: "auto", method });
+});
+
+test("classifyAuthMethods: single agent method ignores experimental siblings", () => {
+  const method = agentMethod("oauth");
+  const result = classifyAuthMethods([
+    experimentalMethod("env", "env_var"),
+    method,
+  ]);
+  assert.deepEqual(result, { kind: "auto", method });
+});
+
+test("classifyAuthMethods: two agent methods prompt the user", () => {
+  const methods = [agentMethod("oauth"), agentMethod("api-key")];
+  assert.deepEqual(classifyAuthMethods(methods), { kind: "pick", methods });
+});
+
+test("classifyAuthMethods: pick filters out experimental methods", () => {
+  const oauth = agentMethod("oauth");
+  const apiKey = agentMethod("api-key");
+  const result = classifyAuthMethods([
+    oauth,
+    experimentalMethod("term", "terminal"),
+    apiKey,
+  ]);
+  assert.deepEqual(result, { kind: "pick", methods: [oauth, apiKey] });
 });

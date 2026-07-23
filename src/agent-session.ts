@@ -6,12 +6,21 @@ import * as path from "path";
 import { Readable, Writable } from "stream";
 import type { TextEditor } from "atom";
 import * as acp from "@agentclientprotocol/sdk";
-import { parseCommandLine, TerminalRecord, buildContextBlock, ContextAttachment } from "./util";
+import {
+  parseCommandLine,
+  TerminalRecord,
+  buildContextBlock,
+  ContextAttachment,
+  classifyAuthMethods,
+} from "./util";
 
 declare const __PULSAR_ACP_AGENT_VERSION__: string;
 
 const PROTOCOL_VERSION = acp.PROTOCOL_VERSION;
 const STARTUP_TIMEOUT_MS = 30_000;
+// JSON-RPC code the agent returns from `session/new` when authentication is
+// required (ACP's `RequestError.authRequired()`; reserved range -32000..-32099).
+const AUTH_REQUIRED_CODE = -32000;
 const DEFAULT_OUTPUT_BYTE_LIMIT = 64 * 1024;
 const MAX_OUTPUT_BYTE_LIMIT = 1024 * 1024;
 const HOST_CONTEXT_START = "<pulsar-acp-agent-host-context>";
@@ -59,6 +68,11 @@ export type AgentEvent =
   | { type: "update"; sessionId: acp.SessionId; update: acp.SessionUpdate }
   | { type: "permissions-cancelled" }
   | {
+      type: "auth-required";
+      methods: acp.AuthMethodAgent[];
+      respond: (methodId: acp.AuthMethodId | null) => void;
+    }
+  | {
       type: "permission";
       params: acp.RequestPermissionRequest;
       respond: (outcome: acp.RequestPermissionResponse) => void;
@@ -71,6 +85,29 @@ export type AgentEvent =
 
 type Listener = (event: AgentEvent) => void;
 
+// Thrown by `_start()` when an in-flight startup — currently only the wait for
+// the user's auth-method choice — is abandoned by a lifecycle teardown (exit,
+// switch, restart, dispose). The view swallows it via `isStartupCancellation`
+// so teardown doesn't surface a spurious error on top of the real status.
+export class StartupCancelled extends Error {
+  constructor() {
+    super("Startup cancelled.");
+    this.name = "StartupCancelled";
+  }
+}
+
+export function isStartupCancellation(error: unknown): boolean {
+  return error instanceof StartupCancelled;
+}
+
+// The outcome of awaiting the user's auth-method choice. `lifecycle` is the
+// silent teardown path (becomes `StartupCancelled`); `cancel` is an explicit
+// user dismissal (a plain, displayed error).
+type AuthChoice =
+  | { type: "method"; methodId: acp.AuthMethodId }
+  | { type: "cancel" }
+  | { type: "lifecycle" };
+
 // The resolved agent a session is launched from. Passed in by the view, which
 // owns agent launch config resolution.
 export interface LaunchTarget {
@@ -79,9 +116,18 @@ export interface LaunchTarget {
   command: string;
 }
 
-interface TerminalAuthMeta {
-  command?: string;
-  args?: string[];
+// Builds a terminal sign-in command from an auth method's agent-controlled
+// `_meta["terminal-auth"]`. `_meta` is untyped `unknown` per ACP, so validate
+// shape before interpolating into a hint shown to the user: require a string
+// `command` and keep only string `args`.
+function terminalAuthCommand(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const meta = raw as { command?: unknown; args?: unknown };
+  if (typeof meta.command !== "string") return null;
+  const args = Array.isArray(meta.args)
+    ? meta.args.filter((arg): arg is string => typeof arg === "string")
+    : [];
+  return [meta.command, ...args].join(" ");
 }
 
 // Builds an SDK error so the ACP transport preserves the JSON-RPC code.
@@ -116,6 +162,7 @@ export class AgentSession {
   private permissionResolvers = new Set<
     (outcome: acp.RequestPermissionResponse) => void
   >();
+  private authChoiceResolve: ((choice: AuthChoice) => void) | null = null;
   private terminals = new Map<string, TerminalRecord>();
   private loadedSessionIds = new Set<string>();
   private hostContextSentSessionIds = new Set<string>();
@@ -292,40 +339,35 @@ export class AgentSession {
       supportsImages: this.promptCapabilities?.image === true,
     });
 
-    if (this.authMethods.length > 0) {
-      const method = this.authMethods[0];
-      this.emit({
-        type: "status",
-        text: `Authenticating: ${method.name}\u2026`,
-      });
+    // Reactive auth: try to open a session first, and only authenticate if the
+    // agent reports it's required (-32000). This avoids re-prompting an
+    // already-signed-in user of a multi-method agent. See docs/acp-conformance
+    // -review.md and the ACP session/new flow.
+    let session: acp.NewSessionResponse;
+    try {
+      session = await this.newSessionWithTimeout(connection, cwd, processError);
+    } catch (error) {
+      if (!(error instanceof acp.RequestError && error.code === AUTH_REQUIRED_CODE)) {
+        throw error;
+      }
+      const method = await this.resolveAuthMethod(processError);
+      this.emit({ type: "status", text: `Authenticating: ${method.name}\u2026` });
       try {
-        await this.withStartupTimeout(
-          Promise.race([
-            connection.authenticate({ methodId: method.id }),
-            processError,
-          ]),
-          "authenticate",
-        );
+        await this.authenticateWithTimeout(connection, method.id, processError);
       } catch (authError) {
         throw new Error(this.loginHint(method, authError));
       }
-    }
-
-    let session: acp.NewSessionResponse;
-    try {
-      session = await this.withStartupTimeout(
-        Promise.race([
-          connection.newSession(this.newSessionRequest(cwd)),
-          processError,
-        ]),
-        "session/new",
-      );
-    } catch (error) {
-      const code = (error as { code?: number } | null)?.code;
-      if (code === -32000 && this.authMethods.length > 0) {
-        throw new Error(this.loginHint(this.authMethods[0], error));
+      try {
+        session = await this.newSessionWithTimeout(connection, cwd, processError);
+      } catch (retryError) {
+        if (
+          retryError instanceof acp.RequestError &&
+          retryError.code === AUTH_REQUIRED_CODE
+        ) {
+          throw new Error(this.loginHint(method, retryError));
+        }
+        throw retryError;
       }
-      throw error;
     }
     this.sessionId = session.sessionId;
     this.sessionCwd = cwd;
@@ -347,6 +389,7 @@ export class AgentSession {
     this.agentCapabilities = null;
     this.promptCapabilities = null;
     this.cancelPendingPermissions();
+    this.cancelPendingAuth();
     this.cleanupTerminals();
     this.loadedSessionIds.clear();
     this.hostContextSentSessionIds.clear();
@@ -567,6 +610,7 @@ export class AgentSession {
       this.starting = null;
     }
     this.cancelPendingPermissions();
+    this.cancelPendingAuth();
   }
 
   private cancelPendingPermissions(): void {
@@ -576,6 +620,94 @@ export class AgentSession {
     }
     this.permissionResolvers.clear();
     this.emit({ type: "permissions-cancelled" });
+  }
+
+  // Settles a pending auth-method wait for a lifecycle teardown (exit, switch,
+  // restart, dispose). Resolves rather than rejects — an orphaned rejection
+  // would surface as an unhandled promise rejection — and clears the resolver
+  // first so it fires at most once. `_start` turns the `lifecycle` choice into
+  // `StartupCancelled`, which the view swallows.
+  private cancelPendingAuth(): void {
+    const resolve = this.authChoiceResolve;
+    if (!resolve) return;
+    this.authChoiceResolve = null;
+    resolve({ type: "lifecycle" });
+  }
+
+  // Chooses the auth method to use after `session/new` reports auth is required.
+  // A single agent-type method authenticates silently; two or more prompt the
+  // user via the `auth-required` event; none yields a clear unsupported error.
+  // The user wait is unbounded (real think-time) but raced against a process
+  // error so a crash during the prompt surfaces its real message.
+  private async resolveAuthMethod(
+    processError: Promise<never>,
+  ): Promise<acp.AuthMethodAgent> {
+    const classification = classifyAuthMethods(this.authMethods);
+    if (classification.kind === "none") {
+      throw new Error(
+        "This agent requires authentication but offers no method this client can use. Sign in with the agent in a terminal, then press Restart.",
+      );
+    }
+    if (classification.kind === "auto") {
+      return classification.method;
+    }
+    const methods = classification.methods;
+    const choice = await Promise.race([
+      new Promise<AuthChoice>((resolve) => {
+        this.authChoiceResolve = resolve;
+        this.emit({
+          type: "auth-required",
+          methods,
+          respond: (methodId) => {
+            const settle = this.authChoiceResolve;
+            if (!settle) return;
+            this.authChoiceResolve = null;
+            settle(
+              methodId == null
+                ? { type: "cancel" }
+                : { type: "method", methodId },
+            );
+          },
+        });
+      }),
+      processError,
+    ]);
+    if (choice.type === "lifecycle") throw new StartupCancelled();
+    if (choice.type === "cancel") {
+      throw new Error("Authentication cancelled. Press Restart to try again.");
+    }
+    const method = methods.find((m) => m.id === choice.methodId);
+    if (!method) {
+      throw new Error(
+        "Selected an unknown authentication method. Press Restart to try again.",
+      );
+    }
+    return method;
+  }
+
+  private async authenticateWithTimeout(
+    connection: acp.ClientSideConnection,
+    methodId: acp.AuthMethodId,
+    processError: Promise<never>,
+  ): Promise<void> {
+    await this.withStartupTimeout(
+      Promise.race([connection.authenticate({ methodId }), processError]),
+      "authenticate",
+    );
+  }
+
+  private newSessionWithTimeout(
+    connection: acp.ClientSideConnection,
+    cwd: string,
+    processError: Promise<never>,
+  ): Promise<acp.NewSessionResponse> {
+    return this.withStartupTimeout(
+      Promise.race([
+        connection.newSession(this.newSessionRequest(cwd)),
+        processError,
+      ]),
+      "session/new",
+    );
   }
 
   private buildClient(): acp.Client {
@@ -799,10 +931,9 @@ export class AgentSession {
   }
 
   private loginHint(method: acp.AuthMethod, error: unknown): string {
-    const meta = method._meta?.["terminal-auth"] as TerminalAuthMeta | undefined;
     const reason = error instanceof Error ? ` (${error.message})` : "";
-    if (meta?.command) {
-      const command = [meta.command, ...(meta.args ?? [])].join(" ");
+    const command = terminalAuthCommand(method._meta?.["terminal-auth"]);
+    if (command) {
       return `Sign-in required${reason}. Run \`${command}\` in a terminal, then press Restart.`;
     }
     return `Sign-in required${reason}. Sign in with the selected agent in a terminal, then press Restart.`;
