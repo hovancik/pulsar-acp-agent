@@ -294,7 +294,7 @@ The SDK is ESM-only, so esbuild bundles it and `zod` into `lib/main.js`.
 | `fs/read_text_file` / `fs/write_text_file` | yes, restricted to the session working directory |
 | `session/request_permission` | yes |
 | `terminal` | yes, working directory is restricted to the project |
-| `authenticate` | yes, uses the first auth method advertised by the agent |
+| `authenticate` | yes, on demand when the agent reports it's required; prompts to choose when the agent offers multiple sign-in methods |
 
 Beyond ACP, this package also adds:
 
