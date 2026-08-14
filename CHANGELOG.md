@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-14
+
 ### Changed
 
 - Authentication is now reactive: you're prompted to sign in only when the agent requires it, with a picker when it offers more than one method.
@@ -15,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The host context is now re-sent when a session is resumed after the agent process restarts.
+- Fixed duplicate user messages appearing in the conversation when the agent echoes them back.
 
 ## [0.3.0] - 2026-07-01
 
@@ -77,7 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File read/write for the agent, scoped to the session working directory.
 - `pulsar-acp-agent:toggle` and `pulsar-acp-agent:focus` activation commands.
 
-[Unreleased]: https://github.com/hovancik/pulsar-acp-agent/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/hovancik/pulsar-acp-agent/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/hovancik/pulsar-acp-agent/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/hovancik/pulsar-acp-agent/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/hovancik/pulsar-acp-agent/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hovancik/pulsar-acp-agent/releases/tag/v0.1.0
