@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The host context is now re-sent when a session is resumed after the agent process restarts.
+- Fixed duplicate user messages appearing in the conversation when the agent echoes them back.
 
 ## [0.3.0] - 2026-07-01
 

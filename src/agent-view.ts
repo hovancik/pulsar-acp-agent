@@ -302,6 +302,7 @@ export class PulsarAcpAgentView {
   private streamBody: HTMLElement | null = null;
   private streamRawText = "";
   private streamRenderHandle: number | null = null;
+  private userEchoSkipCount = 0;
   private stickToBottom = true;
   private lastUserScrollAt = 0;
   private pointerDownInConversation = false;
@@ -399,6 +400,7 @@ export class PulsarAcpAgentView {
     this.subscriptions = new CompositeDisposable();
     this.agentsConfig = readAgentsConfig();
     this.session = new AgentSession();
+    this.userEchoSkipCount = 0;
 
     this.buildUI();
     this.eventSubscription = this.session.onEvent((event) =>
@@ -1518,9 +1520,12 @@ export class PulsarAcpAgentView {
     this.clearThumbnails();
     this.appendUserMessage(text, images, context);
     this.endStreamingBlocks();
+    // Track that we expect an echo from the agent
+    this.userEchoSkipCount++;
     this.sendButton.disabled = true;
     this.session.prompt(text, images, context).catch((error) => {
       if (this.session !== currentSession) return;
+      this.userEchoSkipCount--;
       this.appendError(error.message || String(error));
       this.setAgentStatus("error");
       this.stopButton.disabled = true;
@@ -1552,6 +1557,7 @@ export class PulsarAcpAgentView {
     this.autoApprovePermissions = false;
     this.updateAutoApproveButton();
     this.setFollowAgent(false);
+    this.userEchoSkipCount = 0;
   }
 
   private restart(): void {
@@ -2164,6 +2170,11 @@ export class PulsarAcpAgentView {
   ): void {
     const text = this.contentToText(content);
     if (!text) return;
+    // Skip duplicate user message echo from agent
+    if (role === "user" && this.userEchoSkipCount > 0) {
+      this.userEchoSkipCount--;
+      return;
+    }
     const streamMessageId = messageId ?? null;
     if (
       this.streamRole !== role ||
