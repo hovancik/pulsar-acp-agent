@@ -12,11 +12,11 @@ const nodeTarget = readFileSync(
   "utf8",
 ).trim();
 
-// main.ts is Pulsar's entry point. util.ts and agent-config.ts are bundled on
-// their own as well so their pure helpers can be unit-tested without loading
-// `atom` (test/ imports lib/util.js and lib/agent-config.js).
+// main.ts is Pulsar's entry point. util.ts, agent-config.ts and search.ts are
+// bundled on their own as well so their pure helpers can be unit-tested
+// without loading `atom` (test/ imports lib/util.js, lib/agent-config.js and lib/search.js).
 const options = {
-  entryPoints: ["src/main.ts", "src/util.ts", "src/agent-config.ts"],
+  entryPoints: ["src/main.ts", "src/util.ts", "src/agent-config.ts", "src/search.ts"],
   outdir: "lib",
   bundle: true,
   platform: "node",

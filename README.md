@@ -39,6 +39,7 @@ Currently tested with GitHub Copilot CLI and Mistral Vibe.
   - [Tool calls, diffs, and plans](#tool-calls-diffs-and-plans)
   - [Following the agent](#following-the-agent)
   - [Sessions](#sessions)
+  - [Find in thread](#find-in-thread)
   - [Working directory](#working-directory)
   - [Status bar](#status-bar)
 - [Develop](#develop)
@@ -237,6 +238,14 @@ remove a session. Use the **+** icon in the header to start a new session.
 
 ![Session history and restored conversation](docs/images/session-history.png)
 
+### Find in thread
+
+Press `Ctrl+F` / `Cmd+F` while the chat is focused (or click the magnifier in the header) to open **Find in thread** for the active session. The bar at the top of the chat shows a search box, `Aa` (match case), `.*` (regex), and a scope toggle (`All` = everything including tool output, diffs and terminal; `Chat` = only your prompts and the agent's final answers), plus `▲` / `▼` and a `n/N` counter.
+
+![Find in thread search bar with a highlighted match](docs/images/find-in-thread.png)
+
+`Enter` goes to the next match, `Shift+Enter` to the previous; `F3` / `Shift+F3` also work, and `Escape` or `×` closes the bar and clears highlights. Matches are highlighted and the active match is outlined; navigating to a match inside a collapsed tool output expands it. Search is live while the agent streams and is capped for large threads. To keep the UI responsive, regex mode accepts only simple patterns that cannot cause catastrophic backtracking.
+
 ### Working directory
 
 New sessions use the first open project folder as their working directory.
@@ -278,6 +287,7 @@ Pulsar loads `lib/main.js`. Rebuild after editing `src/`, then reload Pulsar.
   resolve) split out so it can be unit-tested without loading `atom`.
 - `src/util.ts` holds pure helpers (`parseCommandLine`, `flattenInfoRows`,
   `TerminalRecord`) split out so they can be unit-tested without loading `atom`.
+- `src/search.ts` holds pure search helpers (`escapeRegExp`, `buildSearchRegExp`, `isChatMessageBody`) split out so they can be unit-tested without loading `atom`.
 
 The SDK is ESM-only, so esbuild bundles it and `zod` into `lib/main.js`.
 
@@ -285,7 +295,7 @@ The SDK is ESM-only, so esbuild bundles it and `zod` into `lib/main.js`.
 
 `npm test` runs Node's built-in runner over `test/*.test.mjs`. Run
 `npm run build` first because tests import the built bundles (`lib/util.js`,
-`lib/agent-config.js`), not `src/`.
+`lib/agent-config.js`, `lib/search.js`), not `src/`.
 
 ## Supported ACP features
 

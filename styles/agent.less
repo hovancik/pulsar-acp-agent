@@ -1136,7 +1136,8 @@ atom-text-editor .line.pulsar-acp-agent-follow-flash {
 }
 
 .pulsar-acp-agent-sessions-toggle,
-.pulsar-acp-agent-new-session {
+.pulsar-acp-agent-new-session,
+.pulsar-acp-agent-header-search-toggle {
   flex-shrink: 0;
   padding: 2px 4px;
   background: none;
@@ -1168,7 +1169,8 @@ atom-text-editor .line.pulsar-acp-agent-follow-flash {
   }
 }
 
-.pulsar-acp-agent-sessions-toggle {
+.pulsar-acp-agent-sessions-toggle,
+.pulsar-acp-agent-header-search-toggle {
   &[aria-expanded="true"] {
     color: @text-color;
   }
@@ -1317,6 +1319,105 @@ atom-text-editor .line.pulsar-acp-agent-follow-flash {
       background-color: @text-color-error;
     }
   }
+}
+
+.pulsar-acp-agent-search-bar {
+  display: flex;
+  align-items: center;
+  gap: (@component-padding / 2);
+  padding: (@component-padding / 2) @component-padding;
+  border-bottom: 1px solid @pane-item-border-color;
+  background-color: @tool-panel-background-color;
+  flex-shrink: 0;
+}
+
+.pulsar-acp-agent-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: (@component-padding / 4) (@component-padding / 2);
+  font-family: inherit;
+  font-size: 0.9em;
+  background-color: @input-background-color;
+  color: @text-color;
+  border: 1px solid @input-border-color;
+  border-radius: @component-border-radius;
+
+  &:focus {
+    outline: none;
+    border-color: @text-color-info;
+  }
+
+  &.is-error {
+    border-color: @text-color-error;
+    color: @text-color-error;
+  }
+
+  &::-webkit-search-cancel-button {
+    display: none;
+  }
+}
+
+.pulsar-acp-agent-search-toggle,
+.pulsar-acp-agent-search-nav,
+.pulsar-acp-agent-search-close {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: @component-border-radius;
+  color: @text-color-subtle;
+  font-family: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+  line-height: 1;
+
+  &:hover:not(:disabled) {
+    color: @text-color;
+    background-color: @background-color-highlight;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &:focus-visible {
+    outline: 1px solid @text-color-info;
+    outline-offset: 1px;
+  }
+
+  &.is-active {
+    color: @text-color-info;
+    border-color: @text-color-info;
+    background-color: fade(@text-color-info, 10%);
+  }
+}
+
+.pulsar-acp-agent-search-counter {
+  flex-shrink: 0;
+  min-width: 2.5em;
+  text-align: right;
+  color: @text-color-subtle;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+
+  &.is-error {
+    color: @text-color-error;
+  }
+}
+
+.pulsar-acp-agent-search-hit {
+  background-color: fade(@background-color-info, 28%);
+  border-radius: 2px;
+}
+
+.pulsar-acp-agent-search-hit.is-active {
+  background-color: @background-color-highlight;
+  outline: 1px solid @text-color-info;
 }
 
 // Tooltips render under <body>, so this selector must stay top-level. The

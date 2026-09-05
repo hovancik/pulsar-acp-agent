@@ -14,6 +14,10 @@
             'command': 'pulsar-acp-agent:focus'
           }
           {
+            'label': 'Find in Thread'
+            'command': 'pulsar-acp-agent:find-in-conversation'
+          }
+          {
             'label': 'Edit Agents'
             'command': 'pulsar-acp-agent:edit-agents'
           }

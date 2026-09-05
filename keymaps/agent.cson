@@ -1,2 +1,12 @@
 'atom-workspace':
   'ctrl-alt-a': 'pulsar-acp-agent:toggle'
+
+'.pulsar-acp-agent':
+  'ctrl-f': 'pulsar-acp-agent:find-in-conversation'
+  'f3': 'pulsar-acp-agent:find-next'
+  'shift-f3': 'pulsar-acp-agent:find-previous'
+
+'.platform-darwin .pulsar-acp-agent':
+  'cmd-f': 'pulsar-acp-agent:find-in-conversation'
+  'cmd-g': 'pulsar-acp-agent:find-next'
+  'shift-cmd-g': 'pulsar-acp-agent:find-previous'
