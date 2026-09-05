@@ -54,22 +54,7 @@ test("buildSearchRegExp: invalid regex returns null", () => {
 });
 
 test("buildSearchRegExp: rejects unsafe regex patterns", () => {
-  // Patterns are built from concatenated parts (not regex literals or single
-  // string constants) so static analyzers don't need to reason about the
-  // exponential-backtracking shapes: buildSearchRegExp rejects them before
-  // they ever reach `new RegExp`, which is exactly what this test verifies.
-  const nestedQuantifier = "^(" + "a+" + ")+$";
-  const nestedAlternation = "^(" + "a|a" + ")+$";
-  const nestedWildcard = "(" + "." + "*" + ")*";
-  const nestedWordGroup = "(" + "\\w+\\s?" + ")*";
-  const quantifiedBackref = "(a)" + "\\1+";
-  for (const pattern of [
-    nestedQuantifier,
-    nestedAlternation,
-    nestedWildcard,
-    nestedWordGroup,
-    quantifiedBackref,
-  ]) {
+  for (const pattern of ["^(a+)+$", "^(a|a)+$", "(.*)*", "(\\w+\\s?)*", "(a)\\1+"]) {
     assert.equal(buildSearchRegExp(pattern, { caseSensitive: false, regex: true }), null);
   }
 });
