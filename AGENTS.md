@@ -7,7 +7,7 @@ For the end-to-end feature/fix workflow, see the `feature-dev` skill at
 
 ## Architecture
 
-Five `src/` modules, bundled to `lib/` by `build.mjs` (esbuild):
+Six `src/` modules, bundled to `lib/` by `build.mjs` (esbuild):
 
 - `main.ts` — Pulsar entry point: `activate`/`deactivate`, the
   `pulsar-acp-agent:toggle`/`focus`/`edit-agents` commands, the workspace opener
@@ -27,6 +27,8 @@ Five `src/` modules, bundled to `lib/` by `build.mjs` (esbuild):
   import, bundled separately so it's unit-testable like `util.ts`.
 - `util.ts` — pure helpers (`parseCommandLine`, `flattenInfoRows`,
   `TerminalRecord`), bundled separately so it's unit-testable without `atom`.
+- `search.ts` — pure search helpers (`escapeRegExp`, `buildSearchRegExp`,
+  `isChatMessageBody`), bundled separately so it's unit-testable without `atom`.
 
 Flow: `main` opens a `PulsarAcpAgentView` → view owns an `AgentSession` → session
 drives the agent process and emits events → view renders them.

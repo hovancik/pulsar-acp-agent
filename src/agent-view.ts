@@ -26,6 +26,11 @@ import {
   nextTurnActivePlanEntries,
   selectionLineRange,
 } from "./util";
+import {
+  buildSearchRegExp,
+  isChatMessageBody,
+  MAX_SEARCH_HIGHLIGHTS,
+} from "./search";
 
 marked.setOptions({ breaks: true });
 
@@ -344,6 +349,27 @@ export class PulsarAcpAgentView {
   private loadingOverlay!: HTMLElement;
   private scrollToBottomButton!: HTMLButtonElement;
   private generatingIndicator: HTMLElement | null = null;
+  private searchBar!: HTMLElement;
+  private searchInput!: HTMLInputElement;
+  private searchCaseButton!: HTMLButtonElement;
+  private searchRegexButton!: HTMLButtonElement;
+  private searchScopeButton!: HTMLButtonElement;
+  private searchCounter!: HTMLElement;
+  private searchPrevButton!: HTMLButtonElement;
+  private searchNextButton!: HTMLButtonElement;
+  private searchCloseButton!: HTMLButtonElement;
+  private searchToggleButton!: HTMLButtonElement;
+  private searchVisible = false;
+  private searchCaseSensitive = false;
+  private searchRegex = false;
+  private searchScope: "all" | "chat" = "all";
+  private searchMatches: HTMLElement[] = [];
+  private searchActiveIndex: number | null = null;
+  private searchQueryError = false;
+  private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private searchSuppressScrollListener = false;
+  private searchMutationObserver: MutationObserver | null = null;
+  private searchTooltips = new CompositeDisposable();
   private sendButton!: HTMLButtonElement;
   private stopButton!: HTMLButtonElement;
   private autoApproveButton!: HTMLButtonElement;
@@ -409,6 +435,21 @@ export class PulsarAcpAgentView {
     this.subscriptions.add(this.eventSubscription);
     this.subscriptions.add(
       atom.config.onDidChange(CFG_NS, () => this.refreshFromConfig()),
+    );
+    this.subscriptions.add(
+      atom.commands.add(".pulsar-acp-agent", {
+        "pulsar-acp-agent:find-in-conversation": () => this.toggleSearch(),
+        "pulsar-acp-agent:find-next": () => this.searchNext(),
+        "pulsar-acp-agent:find-previous": () => this.searchPrevious(),
+        "core:cancel": (event) => {
+          if (this.searchVisible) {
+            event.stopPropagation();
+            this.closeSearch();
+          } else {
+            (event as unknown as { abortKeyBinding: () => void }).abortKeyBinding();
+          }
+        },
+      }),
     );
     this.renderAgentPicker();
     this.setLifecycleStatus("Idle \u2014 type a message to start the agent.");
@@ -645,6 +686,19 @@ export class PulsarAcpAgentView {
 
     const rightGroup = document.createElement("div");
     rightGroup.classList.add("pulsar-acp-agent-header-right");
+    this.searchToggleButton = document.createElement("button");
+    this.searchToggleButton.classList.add(
+      "pulsar-acp-agent-header-search-toggle",
+      "icon",
+      "icon-search",
+    );
+    this.searchToggleButton.setAttribute("aria-label", "Find in thread");
+    this.searchToggleButton.setAttribute("aria-expanded", "false");
+    this.subscriptions.add(
+      atom.tooltips.add(this.searchToggleButton, { title: "Find in thread" }),
+    );
+    this.searchToggleButton.addEventListener("click", () => this.toggleSearch());
+    rightGroup.appendChild(this.searchToggleButton);
     rightGroup.appendChild(this.sessionsToggle);
     rightGroup.appendChild(this.newSessionButton);
 
@@ -667,6 +721,8 @@ export class PulsarAcpAgentView {
     // (not the header or footer) while history is replayed.
     this.conversationWrapper = document.createElement("div");
     this.conversationWrapper.classList.add("pulsar-acp-agent-conversation-wrapper");
+
+    this.buildSearchBar();
 
     this.planBar = document.createElement("div");
     this.planBar.classList.add("pulsar-acp-agent-plan-bar");
@@ -711,6 +767,11 @@ export class PulsarAcpAgentView {
     this.input.setAttribute("aria-controls", this.slashMenuId);
     this.input.addEventListener("keydown", (event: KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229) return; // IME composing
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        this.toggleSearch();
+        return;
+      }
       if (this.handleSlashKeydown(event)) return;
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
@@ -856,6 +917,464 @@ export class PulsarAcpAgentView {
     button.textContent = label;
     button.addEventListener("click", onClick);
     return button;
+  }
+
+  private buildSearchBar(): void {
+    this.searchBar = document.createElement("div");
+    this.searchBar.classList.add("pulsar-acp-agent-search-bar");
+    this.searchBar.style.display = "none";
+    this.searchBar.setAttribute("role", "search");
+
+    this.searchInput = document.createElement("input");
+    this.searchInput.classList.add("pulsar-acp-agent-search-input", "native-key-bindings");
+    this.searchInput.type = "search";
+    this.searchInput.placeholder = "Search this thread…";
+    this.searchInput.setAttribute("aria-label", "Search this thread");
+    this.searchInput.addEventListener("input", () => this.scheduleSearchUpdate());
+    this.searchInput.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (event.shiftKey) this.searchPrevious();
+        else this.searchNext();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closeSearch();
+      }
+    });
+    this.searchBar.appendChild(this.searchInput);
+
+    this.searchCaseButton = document.createElement("button");
+    this.searchCaseButton.classList.add("pulsar-acp-agent-search-toggle");
+    this.searchCaseButton.textContent = "Aa";
+    this.searchCaseButton.setAttribute("aria-pressed", "false");
+    this.searchCaseButton.setAttribute("aria-label", "Match case");
+    this.searchTooltips.add(
+      atom.tooltips.add(this.searchCaseButton, { title: "Match case" }),
+    );
+    this.searchCaseButton.addEventListener("click", () => {
+      this.searchCaseSensitive = !this.searchCaseSensitive;
+      this.updateSearchToggleButtons();
+      this.scheduleSearchUpdate();
+      this.searchInput.focus();
+    });
+    this.searchBar.appendChild(this.searchCaseButton);
+
+    this.searchRegexButton = document.createElement("button");
+    this.searchRegexButton.classList.add("pulsar-acp-agent-search-toggle");
+    this.searchRegexButton.textContent = ".*";
+    this.searchRegexButton.setAttribute("aria-pressed", "false");
+    this.searchRegexButton.setAttribute("aria-label", "Use regular expression");
+    this.searchTooltips.add(
+      atom.tooltips.add(this.searchRegexButton, { title: "Use regular expression" }),
+    );
+    this.searchRegexButton.addEventListener("click", () => {
+      this.searchRegex = !this.searchRegex;
+      this.updateSearchToggleButtons();
+      this.scheduleSearchUpdate();
+      this.searchInput.focus();
+    });
+    this.searchBar.appendChild(this.searchRegexButton);
+
+    this.searchScopeButton = document.createElement("button");
+    this.searchScopeButton.classList.add("pulsar-acp-agent-search-toggle");
+    this.updateSearchScopeButton();
+    this.searchTooltips.add(
+      atom.tooltips.add(this.searchScopeButton, {
+        title: () => (this.searchScope === "all" ? "Search everything" : "Search chat only"),
+      }),
+    );
+    this.searchScopeButton.addEventListener("click", () => {
+      this.searchScope = this.searchScope === "all" ? "chat" : "all";
+      this.updateSearchScopeButton();
+      this.scheduleSearchUpdate();
+      this.searchInput.focus();
+    });
+    this.searchBar.appendChild(this.searchScopeButton);
+
+    this.searchPrevButton = document.createElement("button");
+    this.searchPrevButton.classList.add("pulsar-acp-agent-search-nav", "icon", "icon-chevron-up");
+    this.searchPrevButton.setAttribute("aria-label", "Previous match");
+    this.searchTooltips.add(
+      atom.tooltips.add(this.searchPrevButton, { title: "Previous match (Shift+Enter)" }),
+    );
+    this.searchPrevButton.addEventListener("click", () => this.searchPrevious());
+    this.searchBar.appendChild(this.searchPrevButton);
+
+    this.searchNextButton = document.createElement("button");
+    this.searchNextButton.classList.add("pulsar-acp-agent-search-nav", "icon", "icon-chevron-down");
+    this.searchNextButton.setAttribute("aria-label", "Next match");
+    this.searchTooltips.add(
+      atom.tooltips.add(this.searchNextButton, { title: "Next match (Enter)" }),
+    );
+    this.searchNextButton.addEventListener("click", () => this.searchNext());
+    this.searchBar.appendChild(this.searchNextButton);
+
+    this.searchCounter = document.createElement("span");
+    this.searchCounter.classList.add("pulsar-acp-agent-search-counter");
+    this.searchBar.appendChild(this.searchCounter);
+
+    this.searchCloseButton = document.createElement("button");
+    this.searchCloseButton.classList.add("pulsar-acp-agent-search-close", "icon", "icon-x");
+    this.searchCloseButton.setAttribute("aria-label", "Close search");
+    this.searchTooltips.add(
+      atom.tooltips.add(this.searchCloseButton, { title: "Close (Escape)" }),
+    );
+    this.searchCloseButton.addEventListener("click", () => this.closeSearch());
+    this.searchBar.appendChild(this.searchCloseButton);
+
+    this.searchBar.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closeSearch();
+      }
+    });
+    // Trap core:cancel on the bar so global handlers don't fire.
+    this.subscriptions.add(
+      atom.commands.add(".pulsar-acp-agent-search-bar", {
+        "core:cancel": (event) => {
+          event.stopPropagation();
+          this.closeSearch();
+        },
+        "core:close": (event) => {
+          event.stopPropagation();
+          this.closeSearch();
+        },
+      }),
+    );
+
+    this.conversationWrapper.appendChild(this.searchBar);
+    this.updateSearchToggleButtons();
+    this.updateSearchCounter();
+
+    // Observe future DOM additions to the active conversation so streaming,
+    // tool output, or permission cards trigger a debounced re-search.
+    this.searchMutationObserver = new MutationObserver(() => {
+      if (this.searchVisible && this.searchInput.value.length > 0 && !this.searchQueryError) {
+        this.scheduleSearchUpdate();
+      }
+    });
+  }
+
+  private observeSearchConversation(): void {
+    if (this.searchMutationObserver) {
+      this.searchMutationObserver.disconnect();
+      this.searchMutationObserver.observe(this.conversation, { childList: true, subtree: true });
+    }
+  }
+
+  private updateSearchToggleButtons(): void {
+    this.searchCaseButton.setAttribute("aria-pressed", String(this.searchCaseSensitive));
+    this.searchCaseButton.classList.toggle("is-active", this.searchCaseSensitive);
+    this.searchRegexButton.setAttribute("aria-pressed", String(this.searchRegex));
+    this.searchRegexButton.classList.toggle("is-active", this.searchRegex);
+  }
+
+  private updateSearchScopeButton(): void {
+    if (this.searchScope === "all") {
+      this.searchScopeButton.textContent = "All";
+      this.searchScopeButton.setAttribute("aria-pressed", "false");
+      this.searchScopeButton.classList.remove("is-active");
+    } else {
+      this.searchScopeButton.textContent = "Chat";
+      this.searchScopeButton.setAttribute("aria-pressed", "true");
+      this.searchScopeButton.classList.add("is-active");
+    }
+    this.searchScopeButton.setAttribute(
+      "aria-label",
+      this.searchScope === "all" ? "Search everything" : "Search chat only",
+    );
+  }
+
+  private toggleSearch(): void {
+    if (this.searchVisible) {
+      if (document.activeElement === this.searchInput) {
+        this.searchInput.select();
+        return;
+      }
+      this.closeSearch();
+    } else this.openSearch();
+  }
+
+  private openSearch(): void {
+    if (this.searchVisible) {
+      this.searchInput.focus();
+      this.searchInput.select();
+      return;
+    }
+    this.searchVisible = true;
+    this.searchBar.style.display = "";
+    this.searchToggleButton.setAttribute("aria-expanded", "true");
+    this.observeSearchConversation();
+    this.searchInput.focus();
+    this.searchInput.select();
+    this.scheduleSearchUpdate();
+  }
+
+  private closeSearch(): void {
+    if (!this.searchVisible) return;
+    this.searchVisible = false;
+    this.searchBar.style.display = "none";
+    this.searchToggleButton.setAttribute("aria-expanded", "false");
+    this.clearSearchHighlights();
+    this.searchInput.value = "";
+    this.searchQueryError = false;
+    this.searchInput.classList.remove("is-error");
+    this.searchCounter.classList.remove("is-error");
+    this.updateSearchCounter();
+    if (this.searchDebounceTimer !== null) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
+    // Return focus to conversation input if possible, else panel.
+    if (this.input) this.input.focus();
+    else this.element.focus();
+  }
+
+  private scheduleSearchUpdate(): void {
+    if (this.searchDebounceTimer !== null) clearTimeout(this.searchDebounceTimer);
+    this.searchDebounceTimer = setTimeout(() => {
+      this.searchDebounceTimer = null;
+      this.updateSearch();
+    }, 120);
+  }
+
+  private scheduleSearchUpdateImmediate(): void {
+    if (this.searchDebounceTimer !== null) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
+    this.updateSearch();
+  }
+
+  private clearSearchHighlights(): void {
+    // Avoid mutation observer feedback loop.
+    this.searchMutationObserver?.disconnect();
+    const marks = this.conversation.querySelectorAll<HTMLElement>(".pulsar-acp-agent-search-hit");
+    for (const mark of Array.from(marks)) {
+      const text = document.createTextNode(mark.textContent ?? "");
+      mark.replaceWith(text);
+    }
+    this.conversation.normalize();
+    this.searchMatches = [];
+    this.searchActiveIndex = null;
+  }
+
+  private clearSearchState(): void {
+    this.clearSearchHighlights();
+    this.searchQueryError = false;
+    this.searchInput.classList.remove("is-error");
+    this.searchCounter.classList.remove("is-error");
+    if (this.searchDebounceTimer !== null) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
+    this.updateSearchCounter();
+  }
+
+  private updateSearchCounter(): void {
+    if (!this.searchVisible) {
+      this.searchCounter.textContent = "";
+      return;
+    }
+    if (this.searchQueryError) {
+      this.searchCounter.textContent = "Invalid or unsafe regex";
+      this.searchCounter.classList.add("is-error");
+      this.searchPrevButton.disabled = true;
+      this.searchNextButton.disabled = true;
+      return;
+    }
+    this.searchCounter.classList.remove("is-error");
+    const total = this.searchMatches.length;
+    if (this.searchInput.value.length === 0) {
+      this.searchCounter.textContent = "";
+      this.searchPrevButton.disabled = true;
+      this.searchNextButton.disabled = true;
+      return;
+    }
+    if (total === 0) {
+      this.searchCounter.textContent = "0/0";
+      this.searchPrevButton.disabled = true;
+      this.searchNextButton.disabled = true;
+      return;
+    }
+    if (total >= MAX_SEARCH_HIGHLIGHTS) {
+      const active = this.searchActiveIndex != null ? this.searchActiveIndex + 1 : 0;
+      this.searchCounter.textContent = `${active}/${total}+`;
+    } else {
+      const active = this.searchActiveIndex != null ? this.searchActiveIndex + 1 : 0;
+      this.searchCounter.textContent = `${active}/${total}`;
+    }
+    this.searchPrevButton.disabled = total === 0;
+    this.searchNextButton.disabled = total === 0;
+  }
+
+  private updateSearch(): void {
+    // Preserve the active match position across a re-search triggered by
+    // streaming/mutations, rather than snapping back to the first match.
+    const previousActiveIndex = this.searchActiveIndex;
+    // Always start from clean slate to avoid nested marks.
+    this.clearSearchHighlights();
+    const query = this.searchInput.value;
+    if (!this.searchVisible || query.length === 0) {
+      this.searchQueryError = false;
+      this.searchInput.classList.remove("is-error");
+      this.searchCounter.classList.remove("is-error");
+      this.updateSearchCounter();
+      return;
+    }
+    const regexp = buildSearchRegExp(query, {
+      caseSensitive: this.searchCaseSensitive,
+      regex: this.searchRegex,
+    });
+    if (!regexp) {
+      this.searchQueryError = true;
+      this.searchInput.classList.add("is-error");
+      this.updateSearchCounter();
+      return;
+    }
+    this.searchQueryError = false;
+    this.searchInput.classList.remove("is-error");
+    this.searchCounter.classList.remove("is-error");
+
+    // Collect text nodes first to avoid mutation during walk.
+    const walker = document.createTreeWalker(this.conversation, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node: Node) => {
+        const parent = (node as Text).parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        if (parent.closest(".pulsar-acp-agent-search-hit")) return NodeFilter.FILTER_REJECT;
+        // Skip role labels — search only body text for chat messages.
+        if (parent.classList.contains("pulsar-acp-agent-message-role")) return NodeFilter.FILTER_REJECT;
+        if (this.searchScope === "chat" && !isChatMessageBody(parent)) return NodeFilter.FILTER_REJECT;
+        const text = (node as Text).textContent ?? "";
+        if (text.trim().length === 0) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    const textNodes: Text[] = [];
+    let current: Node | null = walker.nextNode();
+    while (current) {
+      textNodes.push(current as Text);
+      current = walker.nextNode();
+    }
+
+    let total = 0;
+    const marks: HTMLElement[] = [];
+    outer: for (const textNode of textNodes) {
+      if (total >= MAX_SEARCH_HIGHLIGHTS) break;
+      const text = textNode.textContent ?? "";
+      if (text.length === 0) continue;
+      regexp.lastIndex = 0;
+      const matches: { index: number; length: number }[] = [];
+      let m: RegExpExecArray | null;
+      while ((m = regexp.exec(text)) !== null) {
+        const len = m[0].length;
+        if (len === 0) {
+          regexp.lastIndex++;
+          if (regexp.lastIndex > text.length) break;
+          continue;
+        }
+        matches.push({ index: m.index, length: len });
+        if (total + matches.length >= MAX_SEARCH_HIGHLIGHTS) break;
+        // Prevent infinite loop on zero-length match already handled.
+        if (m.index === regexp.lastIndex) regexp.lastIndex++;
+      }
+      if (matches.length === 0) continue;
+      // Apply in reverse to keep offsets stable, but collect per-node in order.
+      let node: Text | null = textNode;
+      const nodeMarks: HTMLElement[] = [];
+      for (let i = matches.length - 1; i >= 0; i--) {
+        if (total >= MAX_SEARCH_HIGHLIGHTS) break outer;
+        const { index, length } = matches[i];
+        if (!node) break;
+        // Split after match, then split at match start.
+        const after = node.splitText(index + length);
+        const matchNode = node.splitText(index);
+        const mark = document.createElement("mark");
+        mark.classList.add("pulsar-acp-agent-search-hit");
+        mark.appendChild(matchNode);
+        // Insert mark before 'after'
+        if (after.parentNode) after.parentNode.insertBefore(mark, after);
+        else if (node.parentNode) node.parentNode.insertBefore(mark, node.nextSibling);
+        nodeMarks.push(mark);
+        total++;
+        // For next iteration, 'node' stays the part before the match.
+      }
+      nodeMarks.reverse();
+      marks.push(...nodeMarks);
+    }
+    this.searchMatches = marks;
+    if (marks.length > 0) {
+      // Keep the previously active match selected across a re-search
+      // (e.g. triggered by streaming) instead of snapping back to the first
+      // match, as long as that position is still within range.
+      const restoredIndex =
+        previousActiveIndex != null && previousActiveIndex < marks.length
+          ? previousActiveIndex
+          : 0;
+      this.searchActiveIndex = restoredIndex;
+      this.activateSearchMatch(restoredIndex, false);
+    } else {
+      this.searchActiveIndex = null;
+    }
+    this.updateSearchCounter();
+    // Resume observing after our own DOM mutations.
+    this.observeSearchConversation();
+  }
+
+  private activateSearchMatch(index: number, scroll = true): void {
+    if (this.searchMatches.length === 0) return;
+    if (index < 0) index = this.searchMatches.length - 1;
+    if (index >= this.searchMatches.length) index = 0;
+    for (const m of this.searchMatches) m.classList.remove("is-active");
+    const target = this.searchMatches[index];
+    if (!target) return;
+    target.classList.add("is-active");
+    this.searchActiveIndex = index;
+    this.updateSearchCounter();
+    // Auto-expand collapsed tool if match inside. Drive this via the
+    // existing toggle button rather than the toolViews map: that map is
+    // cleared on session switch and not repopulated for a restored cached
+    // conversation, but the toggle's own click handler still holds the
+    // correct ToolView closure for the DOM node regardless.
+    const tool = target.closest(".pulsar-acp-agent-tool") as HTMLElement | null;
+    if (tool) {
+      const body = tool.querySelector<HTMLElement>(".pulsar-acp-agent-tool-body");
+      const toggle = tool.querySelector<HTMLButtonElement>(".pulsar-acp-agent-tool-toggle");
+      if (body && toggle && !body.classList.contains("pulsar-acp-agent-tool-body--expanded")) {
+        toggle.click();
+      }
+    }
+    if (scroll) {
+      this.stickToBottom = false;
+      this.updateScrollToBottomButton();
+      this.searchSuppressScrollListener = true;
+      target.scrollIntoView({ block: "center", behavior: "auto" });
+      // Re-enable after scroll event fires.
+      setTimeout(() => {
+        this.searchSuppressScrollListener = false;
+      }, 250);
+    }
+  }
+
+  private searchNext(): void {
+    if (!this.searchVisible) return;
+    if (this.searchDebounceTimer !== null) this.scheduleSearchUpdateImmediate();
+    if (this.searchQueryError || this.searchMatches.length === 0) return;
+    const next = this.searchActiveIndex == null ? 0 : (this.searchActiveIndex + 1) % this.searchMatches.length;
+    this.activateSearchMatch(next, true);
+  }
+
+  private searchPrevious(): void {
+    if (!this.searchVisible) return;
+    if (this.searchDebounceTimer !== null) this.scheduleSearchUpdateImmediate();
+    if (this.searchQueryError || this.searchMatches.length === 0) return;
+    const prev =
+      this.searchActiveIndex == null
+        ? this.searchMatches.length - 1
+        : (this.searchActiveIndex - 1 + this.searchMatches.length) % this.searchMatches.length;
+    this.activateSearchMatch(prev, true);
   }
 
   private buildConfigSelectors(): HTMLElement {
@@ -1812,6 +2331,8 @@ export class PulsarAcpAgentView {
   }
 
   private resetConversationState(): void {
+    this.clearSearchState();
+    if (this.searchVisible) this.observeSearchConversation();
     this.endAwaitingAuth();
     this.toolViews.clear();
     this.conversationTooltips.dispose();
@@ -1913,6 +2434,7 @@ export class PulsarAcpAgentView {
   // than re-load it (agents reject loading an already-loaded session); reusing
   // the node also preserves canvas pixels and other live DOM state.
   private stashConversation(id: string): void {
+    this.clearSearchHighlights();
     this.rememberPlanStateFor(id);
     this.sessionConversationCache.set(id, this.conversation);
     this.swapInFreshConversation();
@@ -1928,6 +2450,7 @@ export class PulsarAcpAgentView {
   }
 
   private swapInFreshConversation(): void {
+    this.clearSearchState();
     const fresh = document.createElement("div");
     fresh.className = this.conversation.className;
     this.conversation.replaceWith(fresh);
@@ -1938,6 +2461,7 @@ export class PulsarAcpAgentView {
     this.stickToBottom = true;
     this.updateScrollToBottomButton();
     this.attachConversationScrollListener();
+    this.observeSearchConversation();
   }
 
   private showLoadingOverlay(): void {
@@ -1973,11 +2497,16 @@ export class PulsarAcpAgentView {
   }
 
   private swapInConversation(el: HTMLElement): void {
+    this.clearSearchHighlights();
     this.conversation.replaceWith(el);
     this.conversation = el;
     this.stickToBottom = true;
     this.updateScrollToBottomButton();
     this.attachConversationScrollListener();
+    this.observeSearchConversation();
+    if (this.searchVisible && this.searchInput.value.length > 0) {
+      this.scheduleSearchUpdate();
+    }
   }
 
   private handleEvent(event: AgentEvent): void {
@@ -2017,6 +2546,9 @@ export class PulsarAcpAgentView {
           this.snapshotCompletedPlan();
           this.stickToBottom = true;
           this.conversation.scrollTop = this.conversation.scrollHeight;
+          if (this.searchVisible && this.searchInput.value.length > 0) {
+            this.scheduleSearchUpdate();
+          }
         }
         this.sessionsToggle.style.display = this.session.canListSessions()
           ? ""
@@ -2205,6 +2737,9 @@ export class PulsarAcpAgentView {
     if (!this.streamBody) return;
     this.renderMarkdown(this.streamBody, this.streamRawText);
     this.scrollToBottom();
+    if (this.searchVisible && this.searchInput.value.length > 0) {
+      this.scheduleSearchUpdate();
+    }
   }
 
   private endStreamingBlocks(): void {
@@ -2257,6 +2792,9 @@ export class PulsarAcpAgentView {
     message.appendChild(body);
     this.conversation.appendChild(message);
     this.scrollToBottom();
+    if (this.searchVisible && this.searchInput.value.length > 0) {
+      this.scheduleSearchUpdate();
+    }
     return body;
   }
 
@@ -2934,6 +3472,9 @@ export class PulsarAcpAgentView {
       this.updateToolOverflow(tool);
     }
     this.scrollToBottom();
+    if (this.searchVisible && this.searchInput.value.length > 0) {
+      this.scheduleSearchUpdate();
+    }
   }
 
   private async applyToolLocation(tool: ToolView): Promise<void> {
@@ -3738,6 +4279,10 @@ export class PulsarAcpAgentView {
     // image canvas growing above the output — must not flip the flag, or the
     // view would freeze partway up. Reaching the bottom always re-sticks.
     conversation.addEventListener("scroll", () => {
+      if (this.searchSuppressScrollListener) {
+        this.updateScrollToBottomButton();
+        return;
+      }
       const distance =
         conversation.scrollHeight -
         conversation.scrollTop -
@@ -3807,6 +4352,13 @@ export class PulsarAcpAgentView {
     if (this.streamRenderHandle !== null) {
       cancelAnimationFrame(this.streamRenderHandle);
     }
+    if (this.searchDebounceTimer !== null) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
+    this.searchMutationObserver?.disconnect();
+    this.searchMutationObserver = null;
+    this.searchTooltips.dispose();
     this.reporter?.clear(this);
     this.sessionTooltips.dispose();
     this.conversationTooltips.dispose();
