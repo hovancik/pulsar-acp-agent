@@ -277,6 +277,11 @@ npm run watch
 
 Pulsar loads `lib/main.js`. Rebuild after editing `src/`, then reload Pulsar.
 
+Alternatively, open the repo in the included [Dev Container](https://containers.dev/)
+(`.devcontainer`). It is a minimal, hardened environment (non-root user, all Linux
+capabilities dropped) for editing code and running tests, which makes it a good
+fit for LLM coding agents. Run Pulsar on the host for manual UI testing.
+
 ## Architecture
 
 - `src/main.ts` registers commands, opener, dock item, deserializer, and
