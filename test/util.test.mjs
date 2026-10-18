@@ -78,6 +78,17 @@ test("TerminalRecord: does not split a UTF-8 multibyte character", () => {
   assert.equal(record.truncated, true);
 });
 
+test("TerminalRecord: truncation releases the oversized backing allocation", () => {
+  const limit = 64 * 1024;
+  const record = new TerminalRecord(null, limit, () => {});
+  record.append(Buffer.alloc(2 * 1024 * 1024, "x"));
+  record.flushOutput();
+  assert.equal(record.output(), "x".repeat(limit));
+  assert.equal(record.truncated, true);
+  // Output length alone cannot detect a slice retaining the full allocation.
+  assert.equal(record.chunkList[0].buffer.byteLength, limit);
+});
+
 // ---------------------------------------------------------------------------
 // parseCommandLine: quoting and security
 // ---------------------------------------------------------------------------

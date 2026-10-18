@@ -198,7 +198,8 @@ export class TerminalRecord {
       if (newline !== -1 && newline + 1 < combined.length) {
         start = newline + 1;
       }
-      this.chunkList = [combined.subarray(start)];
+      // Copy the retained tail so the full allocation can be freed.
+      this.chunkList = [Buffer.from(combined.subarray(start))];
       this.totalLength = this.chunkList[0].length;
       this.truncated = true;
     }
