@@ -14,6 +14,7 @@ import {
   flattenInfoRows,
   nextTurnActivePlanEntries,
   parseCommandLine,
+  parseTerminalMeta,
   selectionLineRange,
   TerminalRecord,
 } from "../lib/util.js";
@@ -87,6 +88,30 @@ test("TerminalRecord: truncation releases the oversized backing allocation", () 
   assert.equal(record.truncated, true);
   // Output length alone cannot detect a slice retaining the full allocation.
   assert.equal(record.chunkList[0].buffer.byteLength, limit);
+});
+
+test("TerminalRecord: flush and cancel leave no queued output callbacks", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const outputs = [];
+  const record = new TerminalRecord(null, 100, () => outputs.push(record.output()));
+  record.append(Buffer.from("flushed"));
+  record.flushOutput();
+  t.mock.timers.tick(100);
+  assert.deepEqual(outputs, ["flushed"]);
+  record.append(Buffer.from(" canceled"));
+  record.cancelOutput();
+  t.mock.timers.tick(100);
+  assert.deepEqual(outputs, ["flushed"]);
+});
+
+test("parseTerminalMeta: malformed fields do not discard valid output", () => {
+  assert.deepEqual(parseTerminalMeta({
+    terminal_output: { terminal_id: "term", data: "command output" },
+    terminal_exit: null,
+  }), {
+    output: { terminalId: "term", data: "command output" },
+    invalid: true,
+  });
 });
 
 // ---------------------------------------------------------------------------

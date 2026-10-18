@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed missing Codex ACP command output and matched its styling and expansion to other tool output.
 - Fixed excess memory retained after truncating terminal output.
 
 ## [0.4.0] - 2026-08-14
