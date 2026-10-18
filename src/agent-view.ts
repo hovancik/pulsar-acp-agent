@@ -24,7 +24,10 @@ import {
   flattenConfigSelectOptions,
   flattenInfoRows,
   nextTurnActivePlanEntries,
+  parseTerminalMeta,
   selectionLineRange,
+  TerminalRecord,
+  DEFAULT_TERMINAL_OUTPUT_BYTE_LIMIT,
 } from "./util";
 import {
   buildSearchRegExp,
@@ -299,6 +302,7 @@ export class PulsarAcpAgentView {
   private eventSubscription!: { dispose: () => void };
   private toolViews = new Map<string, ToolView>();
   private terminalOutputs = new Map<string, string>();
+  private displayTerminals = new Map<string, TerminalRecord>();
   private activePlanEntries: acp.PlanEntry[] = [];
   private activePlanSessionId: string | null = null;
   private planExpanded = false;
@@ -2313,6 +2317,8 @@ export class PulsarAcpAgentView {
   }
 
   private finishAgentTeardown(statusText: string): void {
+    this.flushDisplayTerminals();
+    this.clearDisplayTerminals();
     this.endAwaitingAuth();
     this.setLifecycleStatus(statusText);
     this.setAgentStatus("error");
@@ -2331,6 +2337,7 @@ export class PulsarAcpAgentView {
   }
 
   private resetConversationState(): void {
+    this.clearDisplayTerminals();
     this.clearSearchState();
     if (this.searchVisible) this.observeSearchConversation();
     this.endAwaitingAuth();
@@ -2434,6 +2441,8 @@ export class PulsarAcpAgentView {
   // than re-load it (agents reject loading an already-loaded session); reusing
   // the node also preserves canvas pixels and other live DOM state.
   private stashConversation(id: string): void {
+    this.flushDisplayTerminals();
+    this.clearDisplayTerminals();
     this.clearSearchHighlights();
     this.rememberPlanStateFor(id);
     this.sessionConversationCache.set(id, this.conversation);
@@ -2444,6 +2453,8 @@ export class PulsarAcpAgentView {
   private rollbackConversation(id: string): void {
     const prev = this.sessionConversationCache.get(id);
     if (prev) {
+      this.clearDisplayTerminals();
+      this.terminalOutputs.clear();
       this.swapInConversation(prev);
       this.restorePlanStateFor(id);
     }
@@ -2570,6 +2581,7 @@ export class PulsarAcpAgentView {
         this.updateSessionControls();
         break;
       case "turn-end":
+        this.flushDisplayTerminals();
         this.setAgentStatus("ready");
         this.stopButton.disabled = true;
         this.setGeneratingState(null);
@@ -2604,6 +2616,7 @@ export class PulsarAcpAgentView {
         console.warn("[pulsar-acp-agent]", event.text);
         break;
       case "error":
+        this.flushDisplayTerminals();
         this.hideLoadingOverlay();
         this.setGeneratingState(null);
         this.appendError(event.message);
@@ -3397,6 +3410,10 @@ export class PulsarAcpAgentView {
   }
 
   private renderToolCall(update: ToolUpdate): void {
+    const meta = parseTerminalMeta(update._meta);
+    if (meta.invalid) {
+      console.warn("[pulsar-acp-agent] Ignoring malformed terminal metadata.");
+    }
     let tool = this.toolViews.get(update.toolCallId);
     if (!tool) {
       const element = document.createElement("div");
@@ -3471,6 +3488,11 @@ export class PulsarAcpAgentView {
       }
       this.updateToolOverflow(tool);
     }
+    if (meta.output) {
+      const { terminalId, data } = meta.output;
+      this.getOrCreateDisplayTerminal(terminalId).append(Buffer.from(data, "utf8"));
+    }
+    if (meta.exitId) this.displayTerminals.get(meta.exitId)?.flushOutput();
     this.scrollToBottom();
     if (this.searchVisible && this.searchInput.value.length > 0) {
       this.scheduleSearchUpdate();
@@ -3525,20 +3547,20 @@ export class PulsarAcpAgentView {
     } else if (item.type === "content") {
       node.textContent = this.contentToText(item.content);
     } else if (item.type === "terminal") {
-      node.classList.add("pulsar-acp-agent-terminal");
-      const pre = document.createElement("pre");
-      pre.classList.add("pulsar-acp-agent-terminal-output");
-      pre.dataset.terminalId = item.terminalId;
-      pre.textContent = this.terminalOutputs.get(item.terminalId) ?? "";
-      node.appendChild(pre);
+      node.classList.add("pulsar-acp-agent-terminal-output");
+      node.dataset.terminalId = item.terminalId;
+      node.textContent =
+        this.displayTerminals.get(item.terminalId)?.output() ??
+        this.terminalOutputs.get(item.terminalId) ?? "";
     }
     return node;
   }
 
   private handleTerminalOutput(terminalId: string, output: string): void {
+    if (this.terminalOutputs.get(terminalId) === output) return;
     this.terminalOutputs.set(terminalId, output);
     const elements = Array.from(
-      this.conversation.querySelectorAll("pre.pulsar-acp-agent-terminal-output"),
+      this.conversation.querySelectorAll(".pulsar-acp-agent-terminal-output"),
     ).filter((el) => (el as HTMLElement).dataset.terminalId === terminalId);
     if (elements.length === 0) return;
     for (const element of elements) {
@@ -3550,6 +3572,36 @@ export class PulsarAcpAgentView {
       }
     }
     this.scrollToBottom();
+  }
+
+  // Zed-compatible metadata describes agent-owned terminals for display only.
+  // These records never enter AgentSession's executable terminal RPC registry.
+  private getOrCreateDisplayTerminal(terminalId: string): TerminalRecord {
+    const record = this.displayTerminals.get(terminalId);
+    if (record) return record;
+    const conversation = this.conversation;
+    const created = new TerminalRecord(
+      null,
+      DEFAULT_TERMINAL_OUTPUT_BYTE_LIMIT,
+      () => {
+        if (
+          this.conversation !== conversation ||
+          this.displayTerminals.get(terminalId) !== created
+        ) return;
+        this.handleTerminalOutput(terminalId, created.output());
+      },
+    );
+    this.displayTerminals.set(terminalId, created);
+    return created;
+  }
+
+  private flushDisplayTerminals(): void {
+    for (const record of this.displayTerminals.values()) record.flushOutput();
+  }
+
+  private clearDisplayTerminals(): void {
+    for (const record of this.displayTerminals.values()) record.cancelOutput();
+    this.displayTerminals.clear();
   }
 
   private renderDiff(node: HTMLElement, diff: acp.Diff): void {
@@ -4347,6 +4399,7 @@ export class PulsarAcpAgentView {
   }
 
   destroy(): void {
+    this.clearDisplayTerminals();
     this.disconnectStartObserver();
     this.clearFollowEffects();
     if (this.streamRenderHandle !== null) {

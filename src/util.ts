@@ -4,6 +4,7 @@ import spawn from "cross-spawn";
 import * as acp from "@agentclientprotocol/sdk";
 
 export const TERMINAL_KILL_GRACE_MS = 2_000;
+export const DEFAULT_TERMINAL_OUTPUT_BYTE_LIMIT = 64 * 1024;
 
 // Splits a command line into argv, honoring double-quoted spans so that
 // executable paths containing spaces can be quoted. Backslashes are literal
@@ -167,6 +168,41 @@ function formatInfoValue(value: unknown): string {
   return JSON.stringify(value) ?? String(value);
 }
 
+// Zed's display-only terminal extension. Read only the fields used by the UI;
+// malformed extension fields must not discard other valid fields in the update.
+export function parseTerminalMeta(meta: unknown): {
+  output?: { terminalId: string; data: string };
+  exitId?: string;
+  invalid: boolean;
+} {
+  const result: ReturnType<typeof parseTerminalMeta> = { invalid: false };
+  if (meta == null) return result;
+  if (typeof meta !== "object" || Array.isArray(meta)) {
+    result.invalid = true;
+    return result;
+  }
+  const fields = meta as Record<string, unknown>;
+  for (const key of ["terminal_output", "terminal_exit"] as const) {
+    if (!Object.prototype.hasOwnProperty.call(fields, key)) continue;
+    const value = fields[key];
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      result.invalid = true;
+      continue;
+    }
+    const field = value as Record<string, unknown>;
+    const terminalId = field.terminal_id;
+    if (typeof terminalId !== "string" || terminalId.length === 0) {
+      result.invalid = true;
+      continue;
+    }
+    if (key === "terminal_exit") result.exitId = terminalId;
+    else if (typeof field.data === "string") {
+      result.output = { terminalId, data: field.data };
+    } else result.invalid = true;
+  }
+  return result;
+}
+
 // Holds a spawned terminal process plus its ring-buffered output. Output is a
 // single merged stdout+stderr buffer truncated from the beginning (oldest
 // dropped) once it exceeds the byte limit, kept at a UTF-8 + line boundary.
@@ -176,7 +212,7 @@ export class TerminalRecord {
   private chunkList: Buffer[] = [];
   private totalLength = 0;
   private waitResolvers = new Set<(status: acp.TerminalExitStatus) => void>();
-  private emitScheduled = false;
+  private outputTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     readonly child: ChildProcess | null,
@@ -210,16 +246,22 @@ export class TerminalRecord {
   // re-rendering the full buffer on each one causes jank. Pull-based
   // `terminal/output` still reads `output()` directly, so it stays current.
   private scheduleEmit(): void {
-    if (this.emitScheduled) return;
-    this.emitScheduled = true;
-    setTimeout(() => {
-      this.emitScheduled = false;
+    if (this.outputTimer !== null) return;
+    this.outputTimer = setTimeout(() => {
+      this.outputTimer = null;
       this.onOutput();
     }, 33);
   }
 
   flushOutput(): void {
+    this.cancelOutput();
     this.onOutput();
+  }
+
+  cancelOutput(): void {
+    if (this.outputTimer === null) return;
+    clearTimeout(this.outputTimer);
+    this.outputTimer = null;
   }
 
   output(): string {

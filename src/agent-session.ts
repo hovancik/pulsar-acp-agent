@@ -12,6 +12,7 @@ import {
   buildContextBlock,
   ContextAttachment,
   classifyAuthMethods,
+  DEFAULT_TERMINAL_OUTPUT_BYTE_LIMIT,
 } from "./util";
 
 declare const __PULSAR_ACP_AGENT_VERSION__: string;
@@ -19,7 +20,6 @@ declare const __PULSAR_ACP_AGENT_VERSION__: string;
 const PROTOCOL_VERSION = acp.PROTOCOL_VERSION;
 const STARTUP_TIMEOUT_MS = 30_000;
 const AUTH_REQUIRED_CODE = -32000;
-const DEFAULT_OUTPUT_BYTE_LIMIT = 64 * 1024;
 const MAX_OUTPUT_BYTE_LIMIT = 1024 * 1024;
 const HOST_CONTEXT_START = "<pulsar-acp-agent-host-context>";
 const HOST_CONTEXT_END = "</pulsar-acp-agent-host-context>";
@@ -303,6 +303,7 @@ export class AgentSession {
           clientCapabilities: {
             fs: { readTextFile: true, writeTextFile: true },
             terminal: true,
+            _meta: { terminal_output: true },
           },
         }),
         processError,
@@ -764,7 +765,7 @@ export class AgentSession {
     const limit = Math.max(
       1,
       Math.min(
-        params.outputByteLimit ?? DEFAULT_OUTPUT_BYTE_LIMIT,
+        params.outputByteLimit ?? DEFAULT_TERMINAL_OUTPUT_BYTE_LIMIT,
         MAX_OUTPUT_BYTE_LIMIT,
       ),
     );
